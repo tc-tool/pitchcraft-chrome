@@ -128,12 +128,14 @@ export async function POST(req: NextRequest) {
 
   // Slack notification for @mentions — fire-and-forget. Don't block the
   // response on this; if Slack is down or the bot isn't configured,
-  // commenting still works.
-  if (
-    mentions.length > 0 &&
-    process.env.SLACK_BOT_TOKEN &&
-    process.env.SLACK_CHANNEL
-  ) {
+  // commenting still works. We gate ONLY on the bot token (SLACK_CHANNEL
+  // is optional — when unset, notifySlackMention runs in DM mode and
+  // pings each mentioned user directly. Requiring SLACK_CHANNEL here
+  // would silently disable DM mode entirely).
+  if (mentions.length > 0 && process.env.SLACK_BOT_TOKEN) {
+    console.log(
+      `[notifySlack] firing for ${mentions.length} mention(s) on comment ${comment.id} (mode=${process.env.SLACK_CHANNEL?.trim() ? "channel" : "dm"})`
+    );
     void (async () => {
       try {
         const allUsers = await getStore().listUsers(deckId);
@@ -164,6 +166,10 @@ export async function POST(req: NextRequest) {
         console.warn("[notifySlack] resolution failed", e);
       }
     })();
+  } else if (mentions.length > 0) {
+    console.log(
+      `[notifySlack] skipped — SLACK_BOT_TOKEN not set (had ${mentions.length} mention(s))`
+    );
   }
 
   return NextResponse.json({ comment }, { status: 201 });
