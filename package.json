@@ -1,0 +1,31 @@
+{
+  "name": "@toolofna/pitchcraft-chrome",
+  "version": "0.1.0",
+  "description": "Pitchcraft's editorial chrome — comments, pins, status overlay, mention typeahead, surface tokens, motion language. Drop into any Pitchcraft deck or Next.js host that wants the same review/edit experience.",
+  "private": false,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CLAUDE.md"
+  ],
+  "peerDependencies": {
+    "framer-motion": "^11",
+    "ioredis": "^5",
+    "next": "^15",
+    "next-auth": "^5.0.0-beta",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,26 @@
+# Dependencies — never committed; consumers install themselves
+node_modules/
+
+# Build artifacts
+*.tsbuildinfo
+.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Env files — chrome itself never reads env, but keep these guarded
+# in case anything is added later
+.env
+.env.local
+.env.*.local
