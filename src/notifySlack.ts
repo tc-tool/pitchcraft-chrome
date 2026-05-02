@@ -74,9 +74,21 @@ async function lookupSlackUserId(
       user?: { id?: string };
       error?: string;
     };
-    if (data.ok && data.user?.id) return data.user.id;
+    if (data.ok && data.user?.id) {
+      console.log(`[notifySlack] resolved ${email} → ${data.user.id}`);
+      return data.user.id;
+    }
+    // Surface the Slack API error so failed lookups are debuggable from
+    // the host's runtime logs. Common values:
+    //   - users_not_found: that email isn't on any Slack user's profile
+    //   - missing_scope:   bot lacks users:read.email
+    //   - invalid_auth:    bot token is wrong/revoked
+    console.warn(
+      `[notifySlack] lookup ${email} failed — slack error: ${data.error ?? "unknown"}`
+    );
     return null;
-  } catch {
+  } catch (e) {
+    console.warn(`[notifySlack] lookup ${email} threw`, e);
     return null;
   }
 }
