@@ -132,10 +132,69 @@ export async function POST(req: NextRequest) {
   // is optional — when unset, notifySlackMention runs in DM mode and
   // pings each mentioned user directly. Requiring SLACK_CHANNEL here
   // would silently disable DM mode entirely).
+  //
+  // We ALSO synchronously perform an email→Slack-ID lookup just for
+  // diagnostic purposes and return the result on the response as
+  // `_slackDebug`. This is temporary — the moment DMs are landing
+  // reliably we can strip it. The point is to surface lookup failures
+  // (missing scope, wrong email, revoked token) somewhere a user can
+  // see them without spelunking through deploy logs.
+  let slackDebug: unknown = undefined;
+
   if (mentions.length > 0 && process.env.SLACK_BOT_TOKEN) {
     console.log(
       `[notifySlack] firing for ${mentions.length} mention(s) on comment ${comment.id} (mode=${process.env.SLACK_CHANNEL?.trim() ? "channel" : "dm"})`
     );
+
+    // Synchronous lookup for the response diagnostic. Cheap (single
+    // Slack API call per mention, 5s timeout) and isolated from the
+    // fire-and-forget post.
+    try {
+      const token = process.env.SLACK_BOT_TOKEN;
+      const lookups = await Promise.all(
+        mentions.map(async (email) => {
+          try {
+            const r = await fetch(
+              `https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+                signal: AbortSignal.timeout(5000),
+              }
+            );
+            const data = (await r.json()) as {
+              ok?: boolean;
+              user?: { id?: string };
+              error?: string;
+            };
+            return {
+              email,
+              ok: !!data.ok,
+              userId: data.user?.id,
+              error: data.error,
+            };
+          } catch (e) {
+            return {
+              email,
+              ok: false,
+              error: e instanceof Error ? e.message : String(e),
+            };
+          }
+        })
+      );
+      slackDebug = {
+        mode: process.env.SLACK_CHANNEL?.trim() ? "channel" : "dm",
+        tokenPresent: true,
+        lookups,
+      };
+    } catch (e) {
+      slackDebug = {
+        mode: "unknown",
+        tokenPresent: true,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+
+    // Real send — fire-and-forget.
     void (async () => {
       try {
         const allUsers = await getStore().listUsers(deckId);
@@ -170,9 +229,17 @@ export async function POST(req: NextRequest) {
     console.log(
       `[notifySlack] skipped — SLACK_BOT_TOKEN not set (had ${mentions.length} mention(s))`
     );
+    slackDebug = {
+      mode: "skipped",
+      tokenPresent: false,
+      note: "SLACK_BOT_TOKEN env var not set on the server",
+    };
   }
 
-  return NextResponse.json({ comment }, { status: 201 });
+  return NextResponse.json(
+    slackDebug ? { comment, _slackDebug: slackDebug } : { comment },
+    { status: 201 }
+  );
 }
 
 export async function PATCH(req: NextRequest) {
