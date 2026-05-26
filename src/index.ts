@@ -41,6 +41,13 @@ export { CHROME_DURATION, CHROME_EASE, CHROME_DURATION_CLASS } from "./motion";
 export { useSlideStatuses } from "./useSlideStatuses";
 export { useReorder } from "./useReorder";
 export { useSlideMutations } from "./useSlideMutations";
+export { usePublish } from "./usePublish";
+export type { PublishedContentSummary } from "./usePublish";
+
+// Deck-level "Publish to production" gate — gated identically to
+// slide-status writes (creative role + email allowlist). Renders
+// nothing for anyone else.
+export { PublishButton } from "./PublishButton";
 
 // Pure helpers — no runtime dependencies on Node APIs.
 export { applyReorder } from "./applyReorder";

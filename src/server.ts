@@ -38,6 +38,8 @@ export {
   reorderGET,
   reorderPATCH,
   reorderDELETE,
+  publishGET,
+  publishPOST,
 } from "./routeHandlers";
 
 // The store — uses ioredis. Importing this on the client side leads

@@ -564,3 +564,65 @@ export async function reorderDELETE(req: NextRequest) {
   await getStore().clearReorder(deckId);
   return NextResponse.json({ ok: true });
 }
+
+// ─── Publish — deck-level snapshot gate for the production view ──────
+//
+// `GET` is public — both staging and production read the snapshot to
+// render the live header ("last published 2h ago") and to source the
+// production deck content respectively.
+//
+// `POST` is creative-only (reuses canEditSlideStatus's permission
+// gate — the same allowlist that controls slide-status writes). Body
+// is `{ deckId, content }` where `content` is an opaque DeckContent
+// blob. The chrome doesn't validate the shape — the host owns the
+// schema and casts back when reading.
+
+export async function publishGET(req: NextRequest) {
+  const deckId = new URL(req.url).searchParams.get("deckId");
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+  const published = await getStore().getPublishedContent(deckId);
+  return NextResponse.json({ published });
+}
+
+export async function publishPOST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "auth required" }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
+
+  const { deckId, content } = body as {
+    deckId?: string;
+    content?: unknown;
+  };
+
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+  if (content == null) {
+    return NextResponse.json({ error: "content required" }, { status: 400 });
+  }
+
+  // Same gate as slide-status writes: creative role + (optionally)
+  // email in NEXT_PUBLIC_DECK_OWNER_EMAILS. Publishing is a deck-wide
+  // action with bigger blast radius than per-slide flips, but the
+  // permission model is the same — anyone who can mark a slide
+  // approved can publish the deck.
+  const userRecord = await getStore().getUser(deckId, session.user.email);
+  if (!canEditSlideStatus(session.user.email, userRecord?.role)) {
+    return NextResponse.json({ error: "not authorized" }, { status: 403 });
+  }
+
+  const published = await getStore().setPublishedContent(
+    deckId,
+    content,
+    session.user.email
+  );
+  return NextResponse.json({ published });
+}

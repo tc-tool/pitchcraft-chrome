@@ -66,6 +66,38 @@ export interface CommentsStore {
   getReorder(deckId: string): Promise<string[] | null>;
   setReorder(deckId: string, slideIds: string[]): Promise<void>;
   clearReorder(deckId: string): Promise<void>;
+  /**
+   * Published deck content snapshot.
+   *
+   * The creative's "Publish" action serializes the host's current
+   * `deckContent` and writes it here. The production view reads from
+   * this snapshot; the staging view always reads live from
+   * `deck.content.ts`. This is the deck-level publish gate, separate
+   * from the per-slide status overlay.
+   *
+   * Content is stored as opaque JSON — chrome doesn't validate the
+   * shape because `DeckContent` is a host-defined type. Hosts cast
+   * back to `DeckContent` when reading.
+   *
+   * Returns null when no snapshot has ever been published (production
+   * falls back to source in that case).
+   */
+  getPublishedContent(deckId: string): Promise<PublishedContent | null>;
+  setPublishedContent(
+    deckId: string,
+    content: unknown,
+    publishedBy: string
+  ): Promise<PublishedContent>;
+}
+
+/** Envelope around a published snapshot. */
+export interface PublishedContent {
+  /** The frozen DeckContent blob — opaque to chrome, cast by the host. */
+  content: unknown;
+  /** ISO 8601 timestamp of when this snapshot was taken. */
+  publishedAt: string;
+  /** Email of the creative who hit the Publish button. */
+  publishedBy: string;
 }
 
 // ─── Keys ──────────────────────────────────────────────────────────────
@@ -91,6 +123,8 @@ const k = {
   slideStatuses: (deckId: string) => `comments:${deckId}:slide-statuses`,
   /** STRING (JSON) — array of slide ids in producer-defined order, or unset. */
   reorder: (deckId: string) => `comments:${deckId}:reorder`,
+  /** STRING (JSON) — published deck snapshot envelope, or unset. */
+  published: (deckId: string) => `comments:${deckId}:published`,
 };
 
 // ─── JSON helpers ─────────────────────────────────────────────────────
@@ -262,6 +296,28 @@ class RedisCommentsStore implements CommentsStore {
   async clearReorder(deckId: string): Promise<void> {
     await this.redis.del(k.reorder(deckId));
   }
+
+  async getPublishedContent(
+    deckId: string
+  ): Promise<PublishedContent | null> {
+    return parseJson<PublishedContent>(
+      await this.redis.get(k.published(deckId))
+    );
+  }
+
+  async setPublishedContent(
+    deckId: string,
+    content: unknown,
+    publishedBy: string
+  ): Promise<PublishedContent> {
+    const payload: PublishedContent = {
+      content,
+      publishedAt: new Date().toISOString(),
+      publishedBy,
+    };
+    await this.redis.set(k.published(deckId), JSON.stringify(payload));
+    return payload;
+  }
 }
 
 // ─── Memory implementation ─────────────────────────────────────────────
@@ -392,6 +448,28 @@ class MemoryCommentsStore implements CommentsStore {
 
   async clearReorder(deckId: string): Promise<void> {
     this.reorders.delete(deckId);
+  }
+
+  private publishedSnapshots = new Map<string, PublishedContent>();
+
+  async getPublishedContent(
+    deckId: string
+  ): Promise<PublishedContent | null> {
+    return this.publishedSnapshots.get(deckId) ?? null;
+  }
+
+  async setPublishedContent(
+    deckId: string,
+    content: unknown,
+    publishedBy: string
+  ): Promise<PublishedContent> {
+    const payload: PublishedContent = {
+      content,
+      publishedAt: new Date().toISOString(),
+      publishedBy,
+    };
+    this.publishedSnapshots.set(deckId, payload);
+    return payload;
   }
 }
 
