@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useQueue } from "./useQueue";
 import { useCurrentUser } from "./useCurrentUser";
@@ -99,6 +100,23 @@ function CompilePromptModal({
   const [dispatchResult, setDispatchResult] =
     useState<DispatchResult | null>(null);
 
+  // The comment panel itself animates with a CSS transform, which
+  // creates a containing block that traps any descendant
+  // `position: fixed` element. Without a portal, this modal renders
+  // inline INSIDE the panel instead of as a full-viewport overlay —
+  // you can see the prompt but the buttons get hidden behind the
+  // composer. Portaling to document.body sidesteps the transform
+  // context entirely.
+  //
+  // SSR-safe: we read document.body inside an effect, not during
+  // render, and bail out (`return null`) until the portal target
+  // exists. First mount renders nothing; second mount renders the
+  // modal in the body.
+  const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setPortalNode(document.body);
+  }, []);
+
   const onCopy = async () => {
     try {
       await navigator.clipboard.writeText(promptText);
@@ -138,7 +156,9 @@ function CompilePromptModal({
     }
   };
 
-  return (
+  if (!portalNode) return null;
+
+  return createPortal(
     <motion.div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       initial={{ opacity: 0 }}
@@ -245,6 +265,7 @@ function CompilePromptModal({
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    portalNode
   );
 }

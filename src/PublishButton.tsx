@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePublish } from "./usePublish";
 import { useCurrentUser } from "./useCurrentUser";
@@ -123,7 +124,16 @@ function PublishConfirmModal({
   error,
   isPublishing,
 }: PublishConfirmModalProps) {
-  return (
+  // Portal-mount so the modal escapes the chrome-bar's transform
+  // context. Without this, fixed positioning gets trapped inside the
+  // bar and the modal renders inline instead of as an overlay.
+  const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setPortalNode(document.body);
+  }, []);
+  if (!portalNode) return null;
+
+  return createPortal(
     <motion.div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm"
       initial={{ opacity: 0 }}
@@ -181,7 +191,8 @@ function PublishConfirmModal({
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    portalNode
   );
 }
 
