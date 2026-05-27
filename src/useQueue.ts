@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useDeckId } from "./CommentsProvider";
-import { onCommentsChanged } from "./events";
+import { notifyCommentsChanged, onCommentsChanged } from "./events";
 import type { Comment } from "./types";
 
 /**
@@ -94,6 +94,17 @@ export function useQueue() {
             error?: string;
           };
           throw new Error(body.error ?? `toggle failed (${res.status})`);
+        }
+        // Server returns the updated comment — use its slideId to fire
+        // a comments-changed event so the per-comment QueueToggle in
+        // the panel reads the fresh `queued` flag. Without this the
+        // checkbox visually stays empty until the panel reloads, which
+        // looks like "nothing happened."
+        const data = (await res.json().catch(() => ({}))) as {
+          comment?: Comment;
+        };
+        if (data.comment?.slideId) {
+          notifyCommentsChanged(data.comment.slideId);
         }
         // Reload to pull the canonical queue (covers the "add" case
         // where we didn't have the Comment locally).

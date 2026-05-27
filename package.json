@@ -1,6 +1,6 @@
 {
   "name": "@toolofna/pitchcraft-chrome",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Pitchcraft's editorial chrome — comments, pins, status overlay, mention typeahead, surface tokens, motion language. Drop into any Pitchcraft deck or Next.js host that wants the same review/edit experience.",
   "private": false,
   "main": "./src/index.ts",
