@@ -38,20 +38,26 @@ export { CHROME_PILL_BASE, CHROME_PILL_HOVER } from "./surfaceTokens";
 export { CHROME_DURATION, CHROME_EASE, CHROME_DURATION_CLASS } from "./motion";
 
 // Hooks that talk to the API via fetch — safe in client bundle.
-export { useSlideStatuses } from "./useSlideStatuses";
 export { useReorder } from "./useReorder";
 export { useSlideMutations } from "./useSlideMutations";
 export { usePublish } from "./usePublish";
 export type { PublishedContentSummary } from "./usePublish";
+export { useQueue } from "./useQueue";
 
 // Deck-level "Publish to production" gate — gated identically to
-// slide-status writes (creative role + email allowlist). Renders
-// nothing for anyone else.
+// canCurate (creative role + email allowlist). Renders nothing for
+// anyone else.
 export { PublishButton } from "./PublishButton";
+
+// Comment-triage UI — checkbox per comment + sticky "Send to Claude"
+// compile button + handoff modal. Same canCurate gate.
+export { QueueToggle } from "./QueueToggle";
+export { QueueBar } from "./QueueBar";
 
 // Pure helpers — no runtime dependencies on Node APIs.
 export { applyReorder } from "./applyReorder";
 export {
+  canCurate,
   canEditSlideStatus,
   canReorderSlides,
   deckOwnerEmails,

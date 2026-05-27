@@ -30,6 +30,9 @@ import { useCommentsForSlide } from "./useCommentsClient";
 import { useCurrentUser } from "./useCurrentUser";
 import { useDeckUsers } from "./useDeckUsers";
 import { useDeckId } from "./CommentsProvider";
+import { useQueue } from "./useQueue";
+import { QueueToggle } from "./QueueToggle";
+import { QueueBar } from "./QueueBar";
 import { tintForAuthor } from "./authorColor";
 import { MentionableTextarea } from "./MentionableTextarea";
 import { renderBody } from "./renderBody";
@@ -151,6 +154,7 @@ export function CommentPanel({
   const { data: session, status: authStatus } = useSession();
   const { user, loading: userLoading, needsRole, setRole } = useCurrentUser();
   const { byEmail: usersByEmail } = useDeckUsers();
+  const { toggle: toggleQueue } = useQueue();
   const {
     threads,
     loading,
@@ -489,6 +493,7 @@ export function CommentPanel({
                         onResolve={() => resolveComment(thread.parent.id)}
                         onReopen={() => reopenComment(thread.parent.id)}
                         onHover={onHoverThread}
+                        onToggleQueue={toggleQueue}
                       />
                     ))}
                   </AnimatePresence>
@@ -527,12 +532,18 @@ export function CommentPanel({
                           onDelete={deleteComment}
                           onResolve={() => resolveComment(thread.parent.id)}
                           onReopen={() => reopenComment(thread.parent.id)}
+                          onToggleQueue={toggleQueue}
                         />
                       ))}
                   </AnimatePresence>
                 </ul>
               );
             })()}
+
+            {/* Sticky "Send to Claude" bar. Renders nothing if queue
+                is empty or the viewer can't curate; otherwise pinned
+                to the bottom of the panel above the composer. */}
+            <QueueBar />
           </div>
 
           <div className="border-t border-black/[0.10] px-6 pb-6 pt-4">
@@ -775,6 +786,7 @@ function ThreadCard({
   onResolve,
   onReopen,
   onHover,
+  onToggleQueue,
 }: {
   thread: Thread;
   canAct: boolean;
@@ -786,6 +798,7 @@ function ThreadCard({
   onResolve: () => Promise<void>;
   onReopen: () => Promise<void>;
   onHover?: (threadId: string | null) => void;
+  onToggleQueue?: (commentId: string, queued: boolean) => Promise<void>;
 }) {
   const { parent, replies } = thread;
   const isResolved = parent.status === "resolved";
@@ -844,6 +857,7 @@ function ThreadCard({
         currentEmail={currentEmail}
         onEdit={onEdit}
         onDelete={onDelete}
+        onToggleQueue={onToggleQueue}
         // Mark only the parent card so the pin-click focus highlight
         // wraps the rounded rectangle, not the replies + action row.
         dataThreadId={parent.id}
@@ -931,6 +945,7 @@ function CommentBlock({
   currentEmail,
   onEdit,
   onDelete,
+  onToggleQueue,
   dataThreadId,
 }: {
   comment: Comment;
@@ -939,6 +954,12 @@ function CommentBlock({
   currentEmail: string | null;
   onEdit: (commentId: string, body: string) => Promise<void>;
   onDelete: (commentId: string) => Promise<void>;
+  /**
+   * Curator-only queue toggle. The QueueToggle itself gates on
+   * canCurate so this can be passed unconditionally; non-curators
+   * just see nothing rendered.
+   */
+  onToggleQueue?: (commentId: string, queued: boolean) => Promise<void>;
   /** When set, this div is the scroll target for pin-click → focus thread. */
   dataThreadId?: string;
 }) {
@@ -1003,7 +1024,14 @@ function CommentBlock({
         <div className="min-w-0 truncate text-[15px] font-medium leading-tight text-[#111]">
           {formatDisplayName(c.authorName)}
         </div>
-        <RoleTag role={c.role} />
+        <div className="flex items-center gap-2">
+          <RoleTag role={c.role} />
+          {/* Queue checkbox — renders only for curator + only on
+              top-level threads (the component self-gates). */}
+          {onToggleQueue && (
+            <QueueToggle comment={c} onToggle={onToggleQueue} />
+          )}
+        </div>
       </div>
 
       {/* Read ↔ edit crossfade. `mode="popLayout"` removes the exiting

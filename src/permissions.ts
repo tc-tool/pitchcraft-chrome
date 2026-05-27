@@ -1,8 +1,14 @@
 /**
- * Permission gate for slide-status edits (and any future "owner-only"
- * affordance). Reads `NEXT_PUBLIC_DECK_OWNER_EMAILS` — a comma-separated
- * list — and locks edit power to those emails. If the env is empty, falls
+ * Curator gate — the "only the owner can drive this deck" check.
+ *
+ * Reads `NEXT_PUBLIC_DECK_OWNER_EMAILS` (comma-separated emails) and
+ * locks high-trust actions to those emails. If the env is empty, falls
  * back to "any user with role = creative on this deck."
+ *
+ * Used to gate:
+ *   - Triaging comments (queued ↔ unqueued)
+ *   - Compiling the queue → Claude prompt
+ *   - Publishing the deck (deck.content.ts snapshot → production)
  *
  * NEXT_PUBLIC_ prefix means the value is inlined into the client bundle,
  * so both server route handlers and client components read the same
@@ -16,7 +22,7 @@ export function deckOwnerEmails(): string[] {
     .filter(Boolean);
 }
 
-export function canEditSlideStatus(
+export function canCurate(
   email: string | null | undefined,
   role: string | null | undefined
 ): boolean {
@@ -27,6 +33,16 @@ export function canEditSlideStatus(
   }
   return role === "creative";
 }
+
+/**
+ * Back-compat alias — the old name was tied to the slide-status pill,
+ * which is being removed. New callers should use `canCurate`. The
+ * alias stays for one release so external decks updating in lockstep
+ * don't break; remove in the next major bump.
+ *
+ * @deprecated use `canCurate` instead
+ */
+export const canEditSlideStatus = canCurate;
 
 /**
  * Slide reordering — broader than slide-status. Producers own the

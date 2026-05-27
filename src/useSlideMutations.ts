@@ -26,7 +26,7 @@ interface UseSlideMutationsReturn {
  *
  * Permission is enforced server-side. The UI in the outline view
  * additionally hides these affordances unless the caller has
- * `canEditSlideStatus`, so producers/clients never see the buttons.
+ * `canCurate`, so producers/clients never see the buttons.
  */
 export function useSlideMutations(): UseSlideMutationsReturn {
   const [busy, setBusy] = useState(false);

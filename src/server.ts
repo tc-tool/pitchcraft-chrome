@@ -33,13 +33,12 @@ export {
   meGET,
   mePOST,
   usersGET,
-  slideStatusGET,
-  slideStatusPATCH,
   reorderGET,
   reorderPATCH,
   reorderDELETE,
   publishGET,
   publishPOST,
+  queueGET,
 } from "./routeHandlers";
 
 // The store — uses ioredis. Importing this on the client side leads

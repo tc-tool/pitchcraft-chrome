@@ -6,7 +6,7 @@ import { AnimatePresence, motion, Reorder, useDragControls } from "framer-motion
 import { useCurrentUser } from "./useCurrentUser";
 import { useReorder } from "./useReorder";
 import { useSlideMutations } from "./useSlideMutations";
-import { canEditSlideStatus, canReorderSlides } from "./permissions";
+import { canCurate, canReorderSlides } from "./permissions";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
 import { applyReorder } from "./applyReorder";
 
@@ -46,9 +46,9 @@ export function OutlineView({
   const slideMutations = useSlideMutations();
 
   const canReorder = canReorderSlides(session?.user?.email, user?.role);
-  // Add/delete is a stronger gate than reorder — writes to source. Same
-  // permission as slide-status (creative + email allowlist).
-  const canMutate = canEditSlideStatus(session?.user?.email, user?.role);
+  // Add/delete is a stronger gate than reorder — writes to source.
+  // Same gate as Publish (creative + email allowlist).
+  const canMutate = canCurate(session?.user?.email, user?.role);
 
   // Local list state — drives the Reorder.Group. Initialized from the
   // effective order (overlay applied to source) so the list matches

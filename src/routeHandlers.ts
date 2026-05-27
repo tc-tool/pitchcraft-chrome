@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "./authConfig";
 import { notifySlackMention } from "./notifySlack";
-import { canEditSlideStatus, canReorderSlides } from "./permissions";
-import { getStore, type SlideStatusValue } from "./store";
+import { canCurate, canReorderSlides } from "./permissions";
+import { getStore } from "./store";
 import type { Comment, CommentRole, CommentStatus } from "./types";
 
 /**
@@ -258,11 +258,13 @@ export async function PATCH(req: NextRequest) {
     commentId,
     status,
     body: newBody,
+    queued,
   } = body as {
     deckId?: string;
     commentId?: string;
     status?: string;
     body?: string;
+    queued?: boolean;
   };
 
   if (!deckId || !commentId) {
@@ -272,9 +274,22 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  // Two PATCH modes: body edit (own comment only) or status change.
-  // If a body is supplied we treat the request as an edit; otherwise
-  // it's a status update.
+  // Three PATCH modes: body edit (own comment only), queue toggle
+  // (creative-only), or status change. Body edits and queue toggles
+  // both check `body`/`queued` first because they're more specific;
+  // status falls through as the default.
+  if (typeof queued === "boolean") {
+    const userRecord = await getStore().getUser(deckId, session.user.email);
+    if (!canCurate(session.user.email, userRecord?.role)) {
+      return NextResponse.json({ error: "not authorized" }, { status: 403 });
+    }
+    const updated = await getStore().setQueued(deckId, commentId, queued);
+    if (!updated) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    return NextResponse.json({ comment: updated });
+  }
+
   if (typeof newBody === "string") {
     const trimmed = newBody.trim();
     if (!trimmed) {
@@ -423,69 +438,6 @@ export async function usersGET(req: NextRequest) {
   return NextResponse.json({ users });
 }
 
-// ─── Slide status overlay — creative-only writes ───────────────────────
-
-const VALID_SLIDE_STATUSES: SlideStatusValue[] = [
-  "draft",
-  "review",
-  "approved",
-];
-
-export async function slideStatusGET(req: NextRequest) {
-  const url = new URL(req.url);
-  const deckId = url.searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
-  }
-  const statuses = await getStore().getSlideStatuses(deckId);
-  return NextResponse.json({ statuses });
-}
-
-export async function slideStatusPATCH(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "auth required" }, { status: 401 });
-  }
-
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "invalid body" }, { status: 400 });
-  }
-
-  const { deckId, slideId, status } = body as {
-    deckId?: string;
-    slideId?: string;
-    status?: string;
-  };
-
-  if (!deckId || !slideId || !status) {
-    return NextResponse.json(
-      { error: "deckId, slideId, status required" },
-      { status: 400 }
-    );
-  }
-  if (!(VALID_SLIDE_STATUSES as string[]).includes(status)) {
-    return NextResponse.json({ error: "invalid status" }, { status: 400 });
-  }
-
-  // Permission gate. If NEXT_PUBLIC_DECK_OWNER_EMAILS is set, only those
-  // emails can edit. Otherwise fall back to "any creative on this deck".
-  const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canEditSlideStatus(session.user.email, userRecord?.role)) {
-    return NextResponse.json(
-      { error: "not authorized" },
-      { status: 403 }
-    );
-  }
-
-  await getStore().setSlideStatus(
-    deckId,
-    slideId,
-    status as SlideStatusValue
-  );
-  return NextResponse.json({ ok: true });
-}
-
 // ─── Slide reorder overlay ────────────────────────────────────────────
 //
 // Producers can reorder the deck's slide sequence without writing to
@@ -571,7 +523,7 @@ export async function reorderDELETE(req: NextRequest) {
 // render the live header ("last published 2h ago") and to source the
 // production deck content respectively.
 //
-// `POST` is creative-only (reuses canEditSlideStatus's permission
+// `POST` is creative-only (reuses canCurate's permission
 // gate — the same allowlist that controls slide-status writes). Body
 // is `{ deckId, content }` where `content` is an opaque DeckContent
 // blob. The chrome doesn't validate the shape — the host owns the
@@ -615,7 +567,7 @@ export async function publishPOST(req: NextRequest) {
   // permission model is the same — anyone who can mark a slide
   // approved can publish the deck.
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canEditSlideStatus(session.user.email, userRecord?.role)) {
+  if (!canCurate(session.user.email, userRecord?.role)) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
@@ -625,4 +577,35 @@ export async function publishPOST(req: NextRequest) {
     session.user.email
   );
   return NextResponse.json({ published });
+}
+
+// ─── Queue — comments triaged for the next "send to Claude" pass ─────
+//
+// GET is creative-only (the queue exists for the curator; producers
+// and clients have no reason to list it). Returns the queued comments
+// in chronological order — useful both for the panel's "N selected"
+// indicator and for compiling the prompt.
+//
+// Toggling individual comments in/out of the queue happens via the
+// main PATCH handler with a `queued: boolean` field; no separate
+// mutation endpoint is needed.
+
+export async function queueGET(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "auth required" }, { status: 401 });
+  }
+
+  const deckId = new URL(req.url).searchParams.get("deckId");
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+
+  const userRecord = await getStore().getUser(deckId, session.user.email);
+  if (!canCurate(session.user.email, userRecord?.role)) {
+    return NextResponse.json({ error: "not authorized" }, { status: 403 });
+  }
+
+  const queued = await getStore().listQueued(deckId);
+  return NextResponse.json({ queued });
 }

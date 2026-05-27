@@ -2,12 +2,6 @@ import { Redis } from "ioredis";
 import type { Comment, CommentRole, CommentStatus, UserRecord } from "./types";
 
 /**
- * Slide-status overlay values. Mirrors deck.schema.ts SlideStatus but is
- * declared locally so this module stays self-contained.
- */
-export type SlideStatusValue = "draft" | "review" | "approved";
-
-/**
  * Comment storage abstraction.
  *
  * Two implementations:
@@ -45,17 +39,6 @@ export interface CommentsStore {
   /** Every user who has signed in + picked a role for this deck. Used by the @mention typeahead. */
   listUsers(deckId: string): Promise<UserRecord[]>;
   /**
-   * Per-slide status overlay. When set, this value wins over the
-   * status declared in `deck.content.ts`. Lets the creative flip a
-   * slide from draft → review → approved without editing source.
-   */
-  getSlideStatuses(deckId: string): Promise<Record<string, SlideStatusValue>>;
-  setSlideStatus(
-    deckId: string,
-    slideId: string,
-    status: SlideStatusValue
-  ): Promise<void>;
-  /**
    * Slide-order overlay. When set, the host renders slides in this
    * order (by id) instead of source order. Producers reorder via
    * the chrome's outline view; the overlay lives until the creative
@@ -66,6 +49,25 @@ export interface CommentsStore {
   getReorder(deckId: string): Promise<string[] | null>;
   setReorder(deckId: string, slideIds: string[]): Promise<void>;
   clearReorder(deckId: string): Promise<void>;
+  /**
+   * Toggle a comment's "queued for implementation" flag. Set on the
+   * comment record itself AND maintained in a side-index set so the
+   * queue can be listed without scanning every comment. Idempotent —
+   * setting `queued=true` on an already-queued comment is a no-op.
+   *
+   * Returns the updated comment, or null if the comment doesn't exist.
+   */
+  setQueued(
+    deckId: string,
+    commentId: string,
+    queued: boolean
+  ): Promise<Comment | null>;
+  /**
+   * Every comment currently in the implementation queue, sorted oldest
+   * first. The compile-prompt button reads this and concatenates the
+   * bodies for the Claude handoff.
+   */
+  listQueued(deckId: string): Promise<Comment[]>;
   /**
    * Published deck content snapshot.
    *
@@ -119,12 +121,12 @@ const k = {
     `comments:${deckId}:user:${email.toLowerCase()}`,
   /** SET of all user emails for a deck — populated on setUser, scanned by listUsers. */
   users: (deckId: string) => `comments:${deckId}:users`,
-  /** HASH of slideId → status. Reuses the existing comments namespace. */
-  slideStatuses: (deckId: string) => `comments:${deckId}:slide-statuses`,
   /** STRING (JSON) — array of slide ids in producer-defined order, or unset. */
   reorder: (deckId: string) => `comments:${deckId}:reorder`,
   /** STRING (JSON) — published deck snapshot envelope, or unset. */
   published: (deckId: string) => `comments:${deckId}:published`,
+  /** SET of comment ids the creative has triaged into the "implement next" queue. */
+  queued: (deckId: string) => `comments:${deckId}:queued`,
 };
 
 // ─── JSON helpers ─────────────────────────────────────────────────────
@@ -224,6 +226,9 @@ class RedisCommentsStore implements CommentsStore {
     pipeline.del(k.item(deckId, commentId));
     pipeline.srem(k.all(deckId), commentId);
     pipeline.srem(k.bySlide(deckId, existing.slideId), commentId);
+    // Defensive: also drop from the queue index so a deleted comment
+    // never re-surfaces in the "send to Claude" compile.
+    pipeline.srem(k.queued(deckId), commentId);
     await pipeline.exec();
     return true;
   }
@@ -264,25 +269,6 @@ class RedisCommentsStore implements CommentsStore {
       .filter((r): r is UserRecord => r !== null);
   }
 
-  async getSlideStatuses(
-    deckId: string
-  ): Promise<Record<string, SlideStatusValue>> {
-    // hgetall on a missing key returns {} in ioredis, not null. The cast
-    // is safe because we only ever write SlideStatusValue values.
-    const map = (await this.redis.hgetall(
-      k.slideStatuses(deckId)
-    )) as Record<string, SlideStatusValue>;
-    return map;
-  }
-
-  async setSlideStatus(
-    deckId: string,
-    slideId: string,
-    status: SlideStatusValue
-  ): Promise<void> {
-    await this.redis.hset(k.slideStatuses(deckId), slideId, status);
-  }
-
   async getReorder(deckId: string): Promise<string[] | null> {
     const raw = await this.redis.get(k.reorder(deckId));
     const parsed = parseJson<string[]>(raw);
@@ -318,6 +304,39 @@ class RedisCommentsStore implements CommentsStore {
     await this.redis.set(k.published(deckId), JSON.stringify(payload));
     return payload;
   }
+
+  async setQueued(
+    deckId: string,
+    commentId: string,
+    queued: boolean
+  ): Promise<Comment | null> {
+    const existing = parseJson<Comment>(
+      await this.redis.get(k.item(deckId, commentId))
+    );
+    if (!existing) return null;
+    const updated: Comment = { ...existing, queued };
+
+    const pipeline = this.redis.pipeline();
+    pipeline.set(k.item(deckId, commentId), JSON.stringify(updated));
+    if (queued) {
+      pipeline.sadd(k.queued(deckId), commentId);
+    } else {
+      pipeline.srem(k.queued(deckId), commentId);
+    }
+    await pipeline.exec();
+    return updated;
+  }
+
+  async listQueued(deckId: string): Promise<Comment[]> {
+    const ids = await this.redis.smembers(k.queued(deckId));
+    if (ids.length === 0) return [];
+    const itemKeys = ids.map((id) => k.item(deckId, id));
+    const blobs = await this.redis.mget(...itemKeys);
+    return blobs
+      .map((b) => parseJson<Comment>(b))
+      .filter((c): c is Comment => c !== null)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
 }
 
 // ─── Memory implementation ─────────────────────────────────────────────
@@ -325,7 +344,6 @@ class RedisCommentsStore implements CommentsStore {
 class MemoryCommentsStore implements CommentsStore {
   private comments = new Map<string, Comment>();
   private users = new Map<string, UserRecord>();
-  private slideStatuses = new Map<string, Record<string, SlideStatusValue>>();
   private reorders = new Map<string, string[]>();
 
   private key(deckId: string, id: string) {
@@ -423,21 +441,6 @@ class MemoryCommentsStore implements CommentsStore {
       .map(([, v]) => v);
   }
 
-  async getSlideStatuses(
-    deckId: string
-  ): Promise<Record<string, SlideStatusValue>> {
-    return { ...(this.slideStatuses.get(deckId) ?? {}) };
-  }
-
-  async setSlideStatus(
-    deckId: string,
-    slideId: string,
-    status: SlideStatusValue
-  ): Promise<void> {
-    const existing = this.slideStatuses.get(deckId) ?? {};
-    this.slideStatuses.set(deckId, { ...existing, [slideId]: status });
-  }
-
   async getReorder(deckId: string): Promise<string[] | null> {
     return this.reorders.get(deckId) ?? null;
   }
@@ -470,6 +473,24 @@ class MemoryCommentsStore implements CommentsStore {
     };
     this.publishedSnapshots.set(deckId, payload);
     return payload;
+  }
+
+  async setQueued(
+    deckId: string,
+    commentId: string,
+    queued: boolean
+  ): Promise<Comment | null> {
+    const existing = this.comments.get(this.key(deckId, commentId));
+    if (!existing) return null;
+    const updated: Comment = { ...existing, queued };
+    this.comments.set(this.key(deckId, commentId), updated);
+    return updated;
+  }
+
+  async listQueued(deckId: string): Promise<Comment[]> {
+    return Array.from(this.comments.values())
+      .filter((c) => c.deckId === deckId && c.queued)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 }
 

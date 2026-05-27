@@ -56,31 +56,6 @@ export function onUsersChanged(fn: UsersListener): () => void {
   };
 }
 
-// ─── Slide statuses ──────────────────────────────────────────────────
-//
-// Fired when the creative flips a slide's status overlay. Lets the
-// SlideStatusPill on every slide refresh without polling.
-
-type StatusesListener = () => void;
-const statusesListeners = new Set<StatusesListener>();
-
-export function notifySlideStatusesChanged() {
-  statusesListeners.forEach((fn) => {
-    try {
-      fn();
-    } catch {
-      /* swallow */
-    }
-  });
-}
-
-export function onSlideStatusesChanged(fn: StatusesListener): () => void {
-  statusesListeners.add(fn);
-  return () => {
-    statusesListeners.delete(fn);
-  };
-}
-
 // ─── Slide reorder ────────────────────────────────────────────────────
 //
 // Fired when a producer (or creative) drags slides into a new order in

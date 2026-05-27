@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePublish } from "./usePublish";
 import { useCurrentUser } from "./useCurrentUser";
-import { canEditSlideStatus } from "./permissions";
+import { canCurate } from "./permissions";
 import { CHROME_PILL_BASE, CHROME_PILL_HOVER } from "./surfaceTokens";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
 
@@ -60,7 +60,7 @@ export function PublishButton({
     return () => clearTimeout(t);
   }, [justPublished]);
 
-  if (!user || !canEditSlideStatus(user.email, user.role)) return null;
+  if (!user || !canCurate(user.email, user.role)) return null;
 
   const onConfirm = async () => {
     try {

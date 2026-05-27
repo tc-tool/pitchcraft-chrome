@@ -61,6 +61,16 @@ export interface Comment {
   resolvedAt?: string;
   /** Email of the resolver. */
   resolvedBy?: string;
+  /**
+   * Curator triage flag — the creative has marked this comment as
+   * "queued for implementation." Drives the per-comment checkbox in
+   * the panel and the bulk "Send to Claude" compile. Independent from
+   * `status`: a comment can be open + queued (will act on it), open +
+   * not-queued (still triaging), or resolved (already handled).
+   *
+   * Only the creative (per canCurate) can toggle this.
+   */
+  queued?: boolean;
 }
 
 /**
