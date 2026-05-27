@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useQueue } from "./useQueue";
 import { useCurrentUser } from "./useCurrentUser";
+import { useDeckId } from "./CommentsProvider";
 import { canCurate } from "./permissions";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
 
@@ -61,6 +62,7 @@ export function QueueBar({ deckTitle }: QueueBarProps) {
           <CompilePromptModal
             promptText={compile(deckTitle)}
             count={queue.length}
+            deckTitle={deckTitle}
             onClose={() => setModalOpen(false)}
           />
         )}
@@ -74,15 +76,28 @@ export function QueueBar({ deckTitle }: QueueBarProps) {
 interface CompilePromptModalProps {
   promptText: string;
   count: number;
+  deckTitle?: string;
   onClose: () => void;
+}
+
+interface DispatchResult {
+  ok: boolean;
+  issueNumber?: number;
+  issueUrl?: string;
+  error?: string;
 }
 
 function CompilePromptModal({
   promptText,
   count,
+  deckTitle,
   onClose,
 }: CompilePromptModalProps) {
+  const deckId = useDeckId();
   const [copied, setCopied] = useState(false);
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchResult, setDispatchResult] =
+    useState<DispatchResult | null>(null);
 
   const onCopy = async () => {
     try {
@@ -92,6 +107,34 @@ function CompilePromptModal({
     } catch {
       // Clipboard write can fail in some browsers — leave the textarea
       // visible so the user can manually select + copy.
+    }
+  };
+
+  const onDispatch = async () => {
+    setDispatching(true);
+    setDispatchResult(null);
+    try {
+      const res = await fetch("/api/comments/queue/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deckId, deckTitle, prompt: promptText }),
+      });
+      const data = (await res.json().catch(() => ({}))) as DispatchResult;
+      if (!res.ok || !data.ok) {
+        setDispatchResult({
+          ok: false,
+          error: data.error ?? `dispatch failed (${res.status})`,
+        });
+      } else {
+        setDispatchResult(data);
+      }
+    } catch (e) {
+      setDispatchResult({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setDispatching(false);
     }
   };
 
@@ -118,8 +161,9 @@ function CompilePromptModal({
               Send {count} comment{count === 1 ? "" : "s"} to Claude
             </h2>
             <p className="mt-1 text-[12px] leading-relaxed text-black/60">
-              Copy this prompt, then paste it as the first message of a
-              new Claude Code session in the deck&apos;s working directory.
+              Send via GitHub opens a pull request you can review and
+              merge. Copy lets you paste the prompt into a Claude Code
+              session yourself.
             </p>
           </div>
           <button
@@ -139,6 +183,37 @@ function CompilePromptModal({
             className="w-full h-[40vh] resize-none rounded-lg bg-black/[0.04] ring-1 ring-black/[0.06] p-3 font-mono text-[11.5px] leading-relaxed text-black/80 focus:outline-none"
             onFocus={(e) => e.currentTarget.select()}
           />
+
+          {/* Result strip — shown after a dispatch attempt. Lives
+              inside the scroll area so a long error message doesn't
+              push the action buttons off-screen. */}
+          {dispatchResult && (
+            <div
+              className={`mt-3 rounded-lg p-3 text-[12px] leading-relaxed ${
+                dispatchResult.ok
+                  ? "bg-emerald-50 text-emerald-900 ring-1 ring-emerald-200"
+                  : "bg-red-50 text-red-900 ring-1 ring-red-200"
+              }`}
+            >
+              {dispatchResult.ok ? (
+                <>
+                  GitHub issue #{dispatchResult.issueNumber} created.
+                  Claude is running — a PR will appear in ~1–2 minutes at{" "}
+                  <a
+                    href={dispatchResult.issueUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-2 hover:text-emerald-700"
+                  >
+                    the issue
+                  </a>
+                  .
+                </>
+              ) : (
+                <>Failed: {dispatchResult.error}</>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 px-6 pb-5">
@@ -152,9 +227,21 @@ function CompilePromptModal({
           <button
             type="button"
             onClick={onCopy}
-            className="rounded-full bg-[#111] px-4 py-1.5 text-[12px] font-medium text-white hover:bg-black"
+            className="rounded-full bg-black/[0.06] px-4 py-1.5 text-[12px] font-medium text-[#111] hover:bg-black/[0.10]"
           >
-            {copied ? "Copied ✓" : "Copy to clipboard"}
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+          <button
+            type="button"
+            onClick={onDispatch}
+            disabled={dispatching || dispatchResult?.ok}
+            className="rounded-full bg-[#111] px-4 py-1.5 text-[12px] font-medium text-white hover:bg-black disabled:opacity-60 disabled:cursor-wait"
+          >
+            {dispatching
+              ? "Sending…"
+              : dispatchResult?.ok
+                ? "Sent ✓"
+                : "Send via GitHub"}
           </button>
         </div>
       </motion.div>

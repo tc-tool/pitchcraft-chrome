@@ -41,6 +41,12 @@ export {
   queueGET,
 } from "./routeHandlers";
 
+// "Send the triage queue to Claude" — creates a labeled GitHub issue
+// that fires the deck repo's claude-triage workflow. Lives in its own
+// file because it touches an external API (GitHub) rather than the
+// chrome's own store.
+export { queueDispatchPOST } from "./queueDispatch";
+
 // The store — uses ioredis. Importing this on the client side leads
 // to "Module not found: Can't resolve 'net'" because ioredis depends
 // on Node's TCP sockets. Server-only.
