@@ -129,7 +129,7 @@ function PublishConfirmModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: CHROME_DURATION, ease: CHROME_EASE }}
+      transition={{ duration: CHROME_DURATION.panel, ease: CHROME_EASE.standard }}
       onClick={onCancel}
     >
       <motion.div
@@ -137,7 +137,7 @@ function PublishConfirmModal({
         initial={{ opacity: 0, y: 8, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 4, scale: 0.99 }}
-        transition={{ duration: CHROME_DURATION, ease: CHROME_EASE }}
+        transition={{ duration: CHROME_DURATION.panel, ease: CHROME_EASE.standard }}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-[15px] font-semibold text-[#111]">

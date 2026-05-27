@@ -40,7 +40,7 @@ export function QueueBar({ deckTitle }: QueueBarProps) {
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 4 }}
-        transition={{ duration: CHROME_DURATION, ease: CHROME_EASE }}
+        transition={{ duration: CHROME_DURATION.panel, ease: CHROME_EASE.standard }}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="text-[11.5px] tabular-nums text-black/65">
@@ -144,7 +144,7 @@ function CompilePromptModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: CHROME_DURATION, ease: CHROME_EASE }}
+      transition={{ duration: CHROME_DURATION.panel, ease: CHROME_EASE.standard }}
       onClick={onClose}
     >
       <motion.div
@@ -152,7 +152,7 @@ function CompilePromptModal({
         initial={{ opacity: 0, y: 8, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 4, scale: 0.99 }}
-        transition={{ duration: CHROME_DURATION, ease: CHROME_EASE }}
+        transition={{ duration: CHROME_DURATION.panel, ease: CHROME_EASE.standard }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-3 border-b border-black/[0.06]">
