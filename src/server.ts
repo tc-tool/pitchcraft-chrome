@@ -47,6 +47,14 @@ export {
 // chrome's own store.
 export { queueDispatchPOST } from "./queueDispatch";
 
+// Slide-source mutations dispatched to Claude via the same workflow.
+// Replaces the old disk-write path (which silently no-ops on Railway).
+// See slideDispatch.ts for the rationale.
+export {
+  slideAddDispatchPOST,
+  slideDeleteDispatchDELETE,
+} from "./slideDispatch";
+
 // The store — uses ioredis. Importing this on the client side leads
 // to "Module not found: Can't resolve 'net'" because ioredis depends
 // on Node's TCP sockets. Server-only.

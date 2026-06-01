@@ -100,6 +100,17 @@ export function OutlineView({
   // would pop the banner into the layout above the list, shift the
   // rows down, and visually break the drag. Sync only when settled.
   const [showBanner, setShowBanner] = useState(hasOverlay);
+
+  // After a successful add/delete dispatch, surface the GitHub issue
+  // URL so the curator can follow / merge the resulting PR. The slide
+  // doesn't visually disappear (or appear) until the PR lands and
+  // Railway redeploys; this strip is the bridge between "I clicked"
+  // and "it's actually different."
+  const [pendingPR, setPendingPR] = useState<
+    | { kind: "add" | "delete"; issueUrl: string; slideId?: string }
+    | null
+  >(null);
+
   useEffect(() => {
     if (!dragging) setShowBanner(hasOverlay);
   }, [dragging, hasOverlay]);
@@ -197,6 +208,36 @@ export function OutlineView({
         <p className="text-[12px] text-red-700">{slideMutations.error}</p>
       )}
 
+      {/* Pending-PR strip — after a mutation succeeds, the slide isn't
+          gone yet (the PR has to land first). Surface the issue link
+          so the user knows where to follow along + merge. Cleared
+          when the user dismisses or triggers another mutation. */}
+      {canMutate && pendingPR && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-black/[0.06] bg-[rgba(244,249,254,0.6)] px-3 py-2 text-[12px] text-black/75">
+          <span>
+            {pendingPR.kind === "add"
+              ? "Slide add requested. "
+              : `Slide ${pendingPR.slideId ? `\`${pendingPR.slideId}\` ` : ""}deletion requested. `}
+            <a
+              href={pendingPR.issueUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2 hover:text-black"
+            >
+              Track the PR on GitHub →
+            </a>
+          </span>
+          <button
+            type="button"
+            onClick={() => setPendingPR(null)}
+            aria-label="Dismiss"
+            className="size-5 rounded-full text-black/45 hover:bg-black/[0.05] hover:text-black/80 transition-colors"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* The list itself. Reorder.Group handles drag-to-reorder.
           When the user can't reorder, we still render rows but
           without drag handles or pointer events on the items. */}
@@ -237,7 +278,14 @@ export function OutlineView({
                 setTimeout(() => setDragging(false), 50);
               }}
               onDelete={async () => {
-                await slideMutations.deleteSlide(slide.id);
+                const result = await slideMutations.deleteSlide(slide.id);
+                if (result.ok && result.issueUrl) {
+                  setPendingPR({
+                    kind: "delete",
+                    issueUrl: result.issueUrl,
+                    slideId: slide.id,
+                  });
+                }
               }}
               deleting={slideMutations.busy}
             />
@@ -273,9 +321,14 @@ export function OutlineView({
           type="button"
           onClick={async () => {
             const lastId = list.length > 0 ? list[list.length - 1].id : null;
-            await slideMutations.addSlide(lastId);
-            // The deck's hot-reload picks up the new slide and the
-            // outline re-renders; no need to manually refresh state.
+            const result = await slideMutations.addSlide(lastId);
+            if (result.ok && result.issueUrl) {
+              setPendingPR({ kind: "add", issueUrl: result.issueUrl });
+            }
+            // The slide doesn't appear in the outline immediately —
+            // a PR is now queued; once it lands and Railway redeploys,
+            // the new placeholder shows up. The pending-PR strip above
+            // tells the user where to follow along.
           }}
           disabled={slideMutations.busy}
           className="mt-1 flex items-center gap-2 self-start rounded-xl px-3 py-2 text-[12px] font-medium text-[#666] transition-[background-color,color,transform] duration-150 ease-out hover:bg-black/[0.03] hover:text-[#111] active:scale-[0.98] active:duration-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
