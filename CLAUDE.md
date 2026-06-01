@@ -2,6 +2,17 @@
 
 This package is the **editorial chrome** that gets installed into every Pitchcraft deck. Comment panel, comment badge, spatial pins, slide-status overlay, mention typeahead, surface tokens, motion language. It is consumed by many decks; what you change here ships to all of them on the next `npm update`.
 
+## Read first: the constitution
+
+> **`PITCHCRAFT.md`** at the root of this repo is the platform's constitution. It governs the whole project — not just chrome. Read it before touching anything in this package.
+
+In the three-layer model from `PITCHCRAFT.md`, this package owns:
+
+- **Review Interface** — every visible component here (CommentPanel, CommentBadge, PublishButton, QueueToggle, QueueBar, OutlineView, MentionableTextarea, SlidePinLayer). These are shared by every deck and must stay visually + behaviorally consistent.
+- **Pitchcraft Core** — every server-only piece (`store.ts`, `routeHandlers.ts`, `queueDispatch.ts`, `notifySlack.ts`, `authConfig.ts`, `permissions.ts`). These are invariant.
+
+What this package does *not* own: Deck Skin (slides, slide types, deck typography, brand identity) — that's the host deck's job.
+
 ## What lives here
 
 - **UI components**: `CommentPanel`, `CommentBadge`, `SlidePinLayer`, `MentionableTextarea`
