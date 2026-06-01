@@ -17,7 +17,8 @@ interface PublishButtonProps {
    */
   content: unknown;
   /**
-   * Optional label override. Default is "Publish to production".
+   * Optional label override. Default is "PUSH" — short on purpose so
+   * the pill matches the height + visual weight of CommentBadge.
    */
   label?: string;
   /**
@@ -45,7 +46,7 @@ interface PublishButtonProps {
  */
 export function PublishButton({
   content,
-  label = "Publish to production",
+  label = "PUSH",
   className = "",
 }: PublishButtonProps) {
   const { user } = useCurrentUser();
@@ -80,17 +81,16 @@ export function PublishButton({
         type="button"
         onClick={() => setConfirmOpen(true)}
         disabled={isPublishing}
-        className={`${CHROME_PILL_BASE} ${CHROME_PILL_HOVER} flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12px] font-medium text-[#111] disabled:opacity-60 disabled:cursor-wait`}
+        className={`inline-flex h-[34px] items-center gap-2 rounded-full px-4 text-[10px] font-medium uppercase text-[#444] ${CHROME_PILL_BASE} ${CHROME_PILL_HOVER} disabled:opacity-60 disabled:cursor-wait`}
       >
         <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-        {justPublished ? "Published" : label}
+        {justPublished ? "Pushed" : label}
       </button>
 
-      {lastPublished && !justPublished && (
-        <div className="absolute right-0 top-full mt-1 whitespace-nowrap text-[10.5px] uppercase tracking-[0.06em] text-white/55">
-          Last published {timeAgo(lastPublished.publishedAt)}
-        </div>
-      )}
+      {/* Last-pushed timestamp moved into the confirm modal — keeping
+          it inline next to the pill made the cluster height
+          inconsistent and pulled the eye off the active slide. The
+          stamp is still readable: open the modal to see when. */}
 
       <AnimatePresence>
         {confirmOpen && (
@@ -160,7 +160,7 @@ function PublishConfirmModal({
         </p>
 
         {lastPublished && (
-          <p className="mt-3 text-[11px] uppercase tracking-[0.06em] text-black/45">
+          <p className="mt-3 text-[11px] uppercase text-black/45">
             Currently live: published {timeAgo(lastPublished.publishedAt)} by{" "}
             {lastPublished.publishedBy}
           </p>

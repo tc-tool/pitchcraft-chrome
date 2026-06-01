@@ -619,7 +619,7 @@ export function CommentPanel({
                         </button>
                       </div>
                       {user && (
-                        <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[#777]">
+                        <div className="mt-0.5 text-[10px] font-medium uppercase text-[#777]">
                           {user.role}
                         </div>
                       )}
@@ -675,7 +675,7 @@ function PanelHeader({
   return (
     <header className="flex shrink-0 cursor-grab items-start justify-between gap-3 px-6 pt-6 pb-5 active:cursor-grabbing">
       <div className="min-w-0 select-none">
-        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#555]">
+        <p className="text-[11px] font-medium uppercase text-[#555]">
           {isOutline ? "Outline" : "Comments"}
         </p>
         <h2 className="mt-1 truncate text-[17px] font-medium tracking-tight text-[#111]">
@@ -750,7 +750,7 @@ function ViewTabs({
             type="button"
             onClick={() => onChange(id)}
             aria-pressed={active}
-            className={`relative flex-1 rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition-colors ${
+            className={`relative flex-1 rounded-full px-3 py-1.5 text-[11px] font-medium uppercase transition-colors ${
               active ? "text-[#111]" : "text-[#666] hover:text-[#111]"
             }`}
           >
@@ -1114,7 +1114,7 @@ function CommentBlock({
               duration: CHROME_DURATION.hover,
               ease: CHROME_EASE.standard,
             }}
-            className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-[#666]">
+            className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] uppercase text-[#666]">
 
           <span>
             {formatRelative(c.createdAt)}
@@ -1240,7 +1240,7 @@ function RolePicker({
                   {opt.title}
                 </span>
                 {busy && (
-                  <span className="text-[10px] uppercase tracking-[0.14em] text-[#888]">
+                  <span className="text-[10px] uppercase text-[#888]">
                     Saving…
                   </span>
                 )}
@@ -1255,7 +1255,7 @@ function RolePicker({
 
       {error && <p className="mt-4 text-[12px] text-red-700">{error}</p>}
 
-      <p className="mt-auto pt-6 text-[10px] uppercase tracking-[0.14em] text-[#777]">
+      <p className="mt-auto pt-6 text-[10px] uppercase text-[#777]">
         Verified via Google
       </p>
     </div>
@@ -1264,7 +1264,7 @@ function RolePicker({
 
 function RoleTag({ role }: { role: CommentRole }) {
   return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-black/[0.08] px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[#444] ring-1 ring-black/[0.06]">
+    <span className="inline-flex shrink-0 items-center rounded-full bg-black/[0.08] px-2.5 py-0.5 text-[10px] font-medium uppercase text-[#444] ring-1 ring-black/[0.06]">
       {role}
     </span>
   );

@@ -170,7 +170,7 @@ export function OutlineView({
           >
             <div className="flex items-center justify-between gap-3 rounded-xl bg-black/[0.04] px-3 py-2 ring-1 ring-black/[0.06]">
               <div className="flex flex-col">
-                <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#555]">
+                <span className="text-[11px] font-medium uppercase text-[#555]">
                   Reorder applied
                 </span>
                 <span className="text-[12px] text-[#666]">
@@ -443,7 +443,7 @@ function RowDeleteAffordance({
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 4 }}
           transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
-          className="flex shrink-0 items-center gap-1 pr-2 text-[11px] uppercase tracking-[0.14em]"
+          className="flex shrink-0 items-center gap-1 pr-2 text-[11px] uppercase"
         >
           <button
             type="button"

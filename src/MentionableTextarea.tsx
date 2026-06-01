@@ -229,7 +229,7 @@ export const MentionableTextarea = forwardRef<
                     {u.email}
                   </span>
                 </span>
-                <span className="text-[10px] uppercase tracking-[0.14em] text-[#999]">
+                <span className="text-[10px] uppercase text-[#999]">
                   {u.role}
                 </span>
               </button>

@@ -40,7 +40,7 @@ export function CommentBadge({
           ? `Comments — ${open} open thread${open === 1 ? "" : "s"}`
           : "Comments"
       }
-      className={`inline-flex h-[34px] items-center gap-2 rounded-full px-4 text-[10px] uppercase tracking-[0.26em] text-[#444] ${CHROME_PILL_BASE} ${CHROME_PILL_HOVER}`}
+      className={`inline-flex h-[34px] items-center gap-2 rounded-full px-4 text-[10px] uppercase font-medium text-[#444] ${CHROME_PILL_BASE} ${CHROME_PILL_HOVER}`}
     >
       {/* Open-thread count — dark filled disc.
           Fixed widths per digit-count keep the box a true square /
