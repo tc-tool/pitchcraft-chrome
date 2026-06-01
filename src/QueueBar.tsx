@@ -37,7 +37,11 @@ export function QueueBar({ deckTitle }: QueueBarProps) {
   return (
     <>
       <motion.div
-        className="sticky bottom-0 z-10 -mx-4 mt-3 border-t border-black/[0.06] bg-[rgba(244,249,254,0.94)] px-4 py-2.5 backdrop-blur-xl backdrop-saturate-150"
+        // Sibling of the scroll list + composer in CommentPanel's flex
+        // column — sits naturally between the two without needing
+        // sticky positioning. px-6 matches the panel's gutter so the
+        // strip aligns with comments above and composer below.
+        className="border-t border-black/[0.06] bg-[rgba(244,249,254,0.6)] px-6 py-2.5"
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 4 }}

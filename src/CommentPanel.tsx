@@ -539,12 +539,13 @@ export function CommentPanel({
                 </ul>
               );
             })()}
-
-            {/* Sticky "Send to Claude" bar. Renders nothing if queue
-                is empty or the viewer can't curate; otherwise pinned
-                to the bottom of the panel above the composer. */}
-            <QueueBar />
           </div>
+
+          {/* Queue handoff strip — sits in the flex flow between the
+              scroll list and the composer so it pins above the
+              composer regardless of how short the comments list is.
+              Renders nothing for empty queue / non-curator viewers. */}
+          <QueueBar />
 
           <div className="border-t border-black/[0.10] px-6 pb-6 pt-4">
             {/* Auth-flow crossfade: loading → sign-in → composer.
