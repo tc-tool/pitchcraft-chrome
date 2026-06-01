@@ -63,6 +63,19 @@ export interface CommentsStore {
     queued: boolean
   ): Promise<Comment | null>;
   /**
+   * Staging-only "this slide is deleted" overlay. Slides whose ids
+   * appear here are filtered out of the staging render so deletion
+   * feels instant; the deck source is brought in line by a Claude PR
+   * the dispatch handler kicks off in parallel.
+   *
+   * `markSlideDeleted` is idempotent. `unmarkSlideDeleted` undoes a
+   * pending delete (e.g. if the curator clicks the wrong slide and
+   * wants to abort before the PR lands).
+   */
+  getDeletedSlides(deckId: string): Promise<Set<string>>;
+  markSlideDeleted(deckId: string, slideId: string): Promise<void>;
+  unmarkSlideDeleted(deckId: string, slideId: string): Promise<void>;
+  /**
    * Every comment currently in the implementation queue, sorted oldest
    * first. The compile-prompt button reads this and concatenates the
    * bodies for the Claude handoff.
@@ -127,6 +140,13 @@ const k = {
   published: (deckId: string) => `comments:${deckId}:published`,
   /** SET of comment ids the creative has triaged into the "implement next" queue. */
   queued: (deckId: string) => `comments:${deckId}:queued`,
+  /**
+   * SET of slide ids the curator has marked deleted. Applied as a
+   * staging-only filter by renderDeckPage so the UI feels instant —
+   * the slide vanishes the moment the curator hits delete, while a
+   * Claude PR catches up in the background to remove it from source.
+   */
+  deletedSlides: (deckId: string) => `comments:${deckId}:deleted-slides`,
 };
 
 // ─── JSON helpers ─────────────────────────────────────────────────────
@@ -337,6 +357,19 @@ class RedisCommentsStore implements CommentsStore {
       .filter((c): c is Comment => c !== null)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
+
+  async getDeletedSlides(deckId: string): Promise<Set<string>> {
+    const ids = await this.redis.smembers(k.deletedSlides(deckId));
+    return new Set(ids);
+  }
+
+  async markSlideDeleted(deckId: string, slideId: string): Promise<void> {
+    await this.redis.sadd(k.deletedSlides(deckId), slideId);
+  }
+
+  async unmarkSlideDeleted(deckId: string, slideId: string): Promise<void> {
+    await this.redis.srem(k.deletedSlides(deckId), slideId);
+  }
 }
 
 // ─── Memory implementation ─────────────────────────────────────────────
@@ -491,6 +524,22 @@ class MemoryCommentsStore implements CommentsStore {
     return Array.from(this.comments.values())
       .filter((c) => c.deckId === deckId && c.queued)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  private deletedSlideOverlays = new Map<string, Set<string>>();
+
+  async getDeletedSlides(deckId: string): Promise<Set<string>> {
+    return new Set(this.deletedSlideOverlays.get(deckId) ?? []);
+  }
+
+  async markSlideDeleted(deckId: string, slideId: string): Promise<void> {
+    const existing = this.deletedSlideOverlays.get(deckId) ?? new Set<string>();
+    existing.add(slideId);
+    this.deletedSlideOverlays.set(deckId, existing);
+  }
+
+  async unmarkSlideDeleted(deckId: string, slideId: string): Promise<void> {
+    this.deletedSlideOverlays.get(deckId)?.delete(slideId);
   }
 }
 

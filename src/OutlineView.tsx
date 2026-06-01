@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "framer-motion";
 import { useCurrentUser } from "./useCurrentUser";
@@ -44,6 +45,7 @@ export function OutlineView({
   const { user } = useCurrentUser();
   const { order: overlayOrder, setOrder, clearOrder } = useReorder();
   const slideMutations = useSlideMutations();
+  const router = useRouter();
 
   const canReorder = canReorderSlides(session?.user?.email, user?.role);
   // Add/delete is a stronger gate than reorder — writes to source.
@@ -208,23 +210,24 @@ export function OutlineView({
         <p className="text-[12px] text-red-700">{slideMutations.error}</p>
       )}
 
-      {/* Pending-PR strip — after a mutation succeeds, the slide isn't
-          gone yet (the PR has to land first). Surface the issue link
-          so the user knows where to follow along + merge. Cleared
-          when the user dismisses or triggers another mutation. */}
+      {/* Pending-PR strip — for deletes the slide is already gone from
+          staging (the overlay handled that synchronously). The PR
+          shown here is for source convergence: when it merges, the
+          slide is gone from deck.content.ts too. Adds work the
+          opposite way — the slide doesn't appear until the PR lands. */}
       {canMutate && pendingPR && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-black/[0.06] bg-[rgba(244,249,254,0.6)] px-3 py-2 text-[12px] text-black/75">
           <span>
             {pendingPR.kind === "add"
-              ? "Slide add requested. "
-              : `Slide ${pendingPR.slideId ? `\`${pendingPR.slideId}\` ` : ""}deletion requested. `}
+              ? "Add slide requested. New slide appears when the PR merges. "
+              : `Slide ${pendingPR.slideId ? `\`${pendingPR.slideId}\` ` : ""}hidden. Source convergence PR opened. `}
             <a
               href={pendingPR.issueUrl}
               target="_blank"
               rel="noreferrer"
               className="underline underline-offset-2 hover:text-black"
             >
-              Track the PR on GitHub →
+              Review on GitHub →
             </a>
           </span>
           <button
@@ -279,12 +282,19 @@ export function OutlineView({
               }}
               onDelete={async () => {
                 const result = await slideMutations.deleteSlide(slide.id);
-                if (result.ok && result.issueUrl) {
-                  setPendingPR({
-                    kind: "delete",
-                    issueUrl: result.issueUrl,
-                    slideId: slide.id,
-                  });
+                if (result.ok) {
+                  // The server has already marked the slide as deleted
+                  // in the staging overlay; refreshing the route re-runs
+                  // renderDeckPage, which now filters the slide out so
+                  // the deck and outline both reflect the change.
+                  router.refresh();
+                  if (result.issueUrl) {
+                    setPendingPR({
+                      kind: "delete",
+                      issueUrl: result.issueUrl,
+                      slideId: slide.id,
+                    });
+                  }
                 }
               }}
               deleting={slideMutations.busy}

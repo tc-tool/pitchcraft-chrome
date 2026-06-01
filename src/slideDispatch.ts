@@ -77,6 +77,26 @@ export async function slideAddDispatchPOST(req: NextRequest) {
  *
  * Body: `{ deckId, slideId }`. Slide id refers to the `id` field of
  * the slide object literal in `slides[]`.
+ *
+ * Two things happen on this call, in order:
+ *
+ * 1. The slide id is added to the `deletedSlides` overlay in Redis.
+ *    `renderDeckPage` reads that overlay in staging mode and filters
+ *    the slide out — so the curator sees it vanish immediately on
+ *    the next request (a client-side router.refresh() takes care of
+ *    that).
+ *
+ * 2. A Claude PR is dispatched to bring deck.content.ts source in
+ *    line with the overlay. The source change merges in the
+ *    background. Once it lands and Railway redeploys, the overlay
+ *    becomes redundant (the slide is gone from source too) and can
+ *    be cleared at any time — keeping an orphan id in the set is
+ *    harmless either way.
+ *
+ * If the PR creation fails (no token, GitHub down, etc.) we still
+ * keep the overlay marking. Source convergence has to happen
+ * manually in that case, but the curator's intent ("this slide
+ * shouldn't be visible") is honored immediately.
  */
 export async function slideDeleteDispatchDELETE(req: NextRequest) {
   const ctx = await guardDispatch(req);
@@ -90,8 +110,12 @@ export async function slideDeleteDispatchDELETE(req: NextRequest) {
     );
   }
 
-  const prompt = composeDeleteSlidePrompt({ deckId, slideId });
+  // (1) Instant hide. This is the part that makes the click feel like
+  // a delete to the user; the PR work below is bookkeeping.
+  await getStore().markSlideDeleted(deckId, slideId);
 
+  // (2) Source convergence via Claude PR.
+  const prompt = composeDeleteSlidePrompt({ deckId, slideId });
   const result = await createClaudeIssue({
     repo: ctx.repo,
     token: ctx.token,
@@ -99,17 +123,16 @@ export async function slideDeleteDispatchDELETE(req: NextRequest) {
     body: prompt,
   });
 
-  if (!result.ok) {
-    return NextResponse.json(
-      { error: result.error },
-      { status: result.status ?? 502 }
-    );
-  }
-
+  // The overlay is already set — even if the PR creation failed, the
+  // curator gets the immediate hide. Surface the PR error so they
+  // know source isn't catching up automatically and someone needs to
+  // make the edit manually (or fix the token).
   return NextResponse.json({
     ok: true,
-    issueNumber: result.issueNumber,
-    issueUrl: result.issueUrl,
+    slideHiddenImmediately: true,
+    issueNumber: result.ok ? result.issueNumber : undefined,
+    issueUrl: result.ok ? result.issueUrl : undefined,
+    prError: result.ok ? undefined : result.error,
   });
 }
 
