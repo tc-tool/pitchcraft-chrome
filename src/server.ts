@@ -47,9 +47,9 @@ export {
 // chrome's own store.
 export { queueDispatchPOST } from "./queueDispatch";
 
-// Slide-source mutations dispatched to Claude via the same workflow.
-// Replaces the old disk-write path (which silently no-ops on Railway).
-// See slideDispatch.ts for the rationale.
+// Slide structural ops — add/delete as instant Redis overlay writes.
+// No GitHub, no Claude PR: the change is live in staging immediately and
+// baked into production on PUSH. See slideDispatch.ts for the rationale.
 export {
   slideAddDispatchPOST,
   slideDeleteDispatchDELETE,

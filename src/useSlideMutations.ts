@@ -4,52 +4,50 @@ import { useCallback, useState } from "react";
 import { useDeckId } from "./CommentsProvider";
 
 /**
- * Result envelope every mutation returns. The mutations now go through
- * the Claude PR dispatch instead of writing the file directly — so
- * "success" means an issue was created and Claude is on it, not that
- * the change is already live. The caller surfaces the PR / issue URL
- * so the user knows where to follow along + merge.
+ * Result envelope every mutation returns. Add/delete are instant
+ * overlay writes — "success" means the change is already live in
+ * staging. The caller follows up with `router.refresh()` so the deck +
+ * outline re-render with the change applied. No PR, no merge, no wait.
  */
 export interface SlideMutationResult {
   ok: boolean;
-  /** GitHub issue created for this dispatch. */
-  issueUrl?: string;
+  /** Add only — the generated id of the new placeholder slide. */
+  slideId?: string;
   /** Surfaced error if `ok: false`. */
   error?: string;
 }
 
 interface UseSlideMutationsReturn {
   /**
-   * Dispatch an "add a placeholder slide after this id (or at top if
-   * null)" request to Claude. The slide doesn't appear immediately —
-   * the user must merge the resulting PR + wait for Railway redeploy.
+   * Add a placeholder slide after this id (or at the top if null). The
+   * slide is recorded in the added-slides overlay immediately; call
+   * `router.refresh()` on success and it appears in the deck + outline.
    */
   addSlide: (afterId: string | null) => Promise<SlideMutationResult>;
   /**
-   * Dispatch a "delete this slide" request to Claude. Same async
-   * semantics as addSlide — the slide remains visible until the PR
-   * lands and Railway redeploys.
+   * Delete a slide. Recorded in the deleted overlay immediately; call
+   * `router.refresh()` on success and it vanishes from the deck +
+   * outline. It stays gone (overlay persists in Redis), and PUSH bakes
+   * the deletion into production.
    */
   deleteSlide: (slideId: string) => Promise<SlideMutationResult>;
-  /** True while either operation's POST is in flight. */
+  /** True while either operation's request is in flight. */
   busy: boolean;
   /** Last error message, or null. Cleared on the next call. */
   error: string | null;
 }
 
 /**
- * Slide source mutations — composes a prompt server-side and creates a
- * labeled GitHub issue that fires the deck repo's claude-triage workflow.
- * Claude opens a PR with the change; the creative reviews and merges.
+ * Slide structural mutations — add and delete, as instant overlay writes.
  *
- * Why this isn't a direct file write: `deck.content.ts` is bundled into
- * the Next.js server at build time. A file write on Railway succeeds
- * but doesn't reload the in-memory bundle, so the change is invisible;
- * the next deploy resets the file from git anyway. The PR path is the
- * only reliable way to mutate deck source in production.
+ * These hit `/api/slides`, which records the change in Redis and returns
+ * right away. The slide doesn't round-trip through git: deletions and
+ * additions live in overlays that the deck render applies in staging and
+ * that PUSH bakes into production. The host's `deck.content.ts` is only
+ * reconciled later, deliberately, through Claude Code.
  *
- * Permission is enforced server-side. The UI in the outline view
- * additionally hides these affordances unless the caller has
+ * Permission is enforced server-side (creative role + owner allowlist).
+ * The outline view also hides these affordances unless the caller has
  * `canCurate`, so producers/clients never see the buttons.
  */
 export function useSlideMutations(): UseSlideMutationsReturn {
@@ -69,16 +67,15 @@ export function useSlideMutations(): UseSlideMutationsReturn {
         });
         const data = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
-          issueUrl?: string;
+          slideId?: string;
           error?: string;
         };
         if (!res.ok || !data.ok) {
-          const message =
-            data.error ?? `Failed to add slide (${res.status})`;
+          const message = data.error ?? `Failed to add slide (${res.status})`;
           setError(message);
           return { ok: false, error: message };
         }
-        return { ok: true, issueUrl: data.issueUrl };
+        return { ok: true, slideId: data.slideId };
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : "Failed to add slide.";
         setError(message);
@@ -102,7 +99,6 @@ export function useSlideMutations(): UseSlideMutationsReturn {
         });
         const data = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
-          issueUrl?: string;
           error?: string;
         };
         if (!res.ok || !data.ok) {
@@ -111,7 +107,7 @@ export function useSlideMutations(): UseSlideMutationsReturn {
           setError(message);
           return { ok: false, error: message };
         }
-        return { ok: true, issueUrl: data.issueUrl };
+        return { ok: true };
       } catch (e: unknown) {
         const message =
           e instanceof Error ? e.message : "Failed to delete slide.";

@@ -103,16 +103,6 @@ export function OutlineView({
   // rows down, and visually break the drag. Sync only when settled.
   const [showBanner, setShowBanner] = useState(hasOverlay);
 
-  // After a successful add/delete dispatch, surface the GitHub issue
-  // URL so the curator can follow / merge the resulting PR. The slide
-  // doesn't visually disappear (or appear) until the PR lands and
-  // Railway redeploys; this strip is the bridge between "I clicked"
-  // and "it's actually different."
-  const [pendingPR, setPendingPR] = useState<
-    | { kind: "add" | "delete"; issueUrl: string; slideId?: string }
-    | null
-  >(null);
-
   useEffect(() => {
     if (!dragging) setShowBanner(hasOverlay);
   }, [dragging, hasOverlay]);
@@ -210,37 +200,6 @@ export function OutlineView({
         <p className="text-[12px] text-red-700">{slideMutations.error}</p>
       )}
 
-      {/* Pending-PR strip — for deletes the slide is already gone from
-          staging (the overlay handled that synchronously). The PR
-          shown here is for source convergence: when it merges, the
-          slide is gone from deck.content.ts too. Adds work the
-          opposite way — the slide doesn't appear until the PR lands. */}
-      {canMutate && pendingPR && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-black/[0.06] bg-[rgba(244,249,254,0.6)] px-3 py-2 text-[12px] text-black/75">
-          <span>
-            {pendingPR.kind === "add"
-              ? "Add slide requested. New slide appears when the PR merges. "
-              : `Slide ${pendingPR.slideId ? `\`${pendingPR.slideId}\` ` : ""}hidden. Source convergence PR opened. `}
-            <a
-              href={pendingPR.issueUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="underline underline-offset-2 hover:text-black"
-            >
-              Review on GitHub →
-            </a>
-          </span>
-          <button
-            type="button"
-            onClick={() => setPendingPR(null)}
-            aria-label="Dismiss"
-            className="size-5 rounded-full text-black/45 hover:bg-black/[0.05] hover:text-black/80 transition-colors"
-          >
-            ×
-          </button>
-        </div>
-      )}
-
       {/* The list itself. Reorder.Group handles drag-to-reorder.
           When the user can't reorder, we still render rows but
           without drag handles or pointer events on the items. */}
@@ -283,18 +242,11 @@ export function OutlineView({
               onDelete={async () => {
                 const result = await slideMutations.deleteSlide(slide.id);
                 if (result.ok) {
-                  // The server has already marked the slide as deleted
-                  // in the staging overlay; refreshing the route re-runs
-                  // renderDeckPage, which now filters the slide out so
-                  // the deck and outline both reflect the change.
+                  // The slide is already marked deleted in the overlay;
+                  // refreshing the route re-runs renderDeckPage, which
+                  // filters it out so the deck and outline both reflect
+                  // the change instantly. No PR, no merge.
                   router.refresh();
-                  if (result.issueUrl) {
-                    setPendingPR({
-                      kind: "delete",
-                      issueUrl: result.issueUrl,
-                      slideId: slide.id,
-                    });
-                  }
                 }
               }}
               deleting={slideMutations.busy}
@@ -332,13 +284,12 @@ export function OutlineView({
           onClick={async () => {
             const lastId = list.length > 0 ? list[list.length - 1].id : null;
             const result = await slideMutations.addSlide(lastId);
-            if (result.ok && result.issueUrl) {
-              setPendingPR({ kind: "add", issueUrl: result.issueUrl });
+            if (result.ok) {
+              // The placeholder is recorded in the overlay; refreshing
+              // re-runs renderDeckPage, which splices it in so it shows
+              // up in the deck and outline immediately. No PR.
+              router.refresh();
             }
-            // The slide doesn't appear in the outline immediately —
-            // a PR is now queued; once it lands and Railway redeploys,
-            // the new placeholder shows up. The pending-PR strip above
-            // tells the user where to follow along.
           }}
           disabled={slideMutations.busy}
           className="mt-1 flex items-center gap-2 self-start rounded-xl px-3 py-2 text-[12px] font-medium text-[#666] transition-[background-color,color,transform] duration-150 ease-out hover:bg-black/[0.03] hover:text-[#111] active:scale-[0.98] active:duration-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"

@@ -63,18 +63,38 @@ export interface CommentsStore {
     queued: boolean
   ): Promise<Comment | null>;
   /**
-   * Staging-only "this slide is deleted" overlay. Slides whose ids
-   * appear here are filtered out of the staging render so deletion
-   * feels instant; the deck source is brought in line by a Claude PR
-   * the dispatch handler kicks off in parallel.
+   * "This slide is deleted" overlay. Slides whose ids appear here are
+   * filtered out of the staging render so deletion is instant, and are
+   * baked out of the production snapshot on PUSH. This is the source of
+   * truth for "this slide is gone" — there is NO source-convergence PR.
+   * `deck.content.ts` is only reconciled later, as a deliberate
+   * authoring act (through Claude Code), never as a tax on a click.
    *
-   * `markSlideDeleted` is idempotent. `unmarkSlideDeleted` undoes a
-   * pending delete (e.g. if the curator clicks the wrong slide and
-   * wants to abort before the PR lands).
+   * `markSlideDeleted` is idempotent. `unmarkSlideDeleted` undoes it.
    */
   getDeletedSlides(deckId: string): Promise<Set<string>>;
   markSlideDeleted(deckId: string, slideId: string): Promise<void>;
   unmarkSlideDeleted(deckId: string, slideId: string): Promise<void>;
+  /**
+   * "These placeholder slides were added" overlay. Each entry is a
+   * generated id plus the source slide id it should follow (`afterId`,
+   * or null for the top of the deck). Purely structural + id-based —
+   * chrome stores no slide content here. The host materializes a
+   * placeholder slide for each id at render time (it owns the slide
+   * schema; chrome stays content-agnostic).
+   *
+   * Like the deleted overlay, this is authoritative: an added slide is
+   * real the instant it's recorded, shows in staging immediately, and
+   * is baked into the production snapshot on PUSH. No PR. Reconciling
+   * into source (filling the placeholder with real content) is a
+   * separate, deliberate authoring step.
+   *
+   * `addSlide` de-dupes by id. `removeAddedSlide` drops an entry (e.g.
+   * the curator deletes a placeholder they just added).
+   */
+  getAddedSlides(deckId: string): Promise<AddedSlide[]>;
+  addSlide(deckId: string, entry: AddedSlide): Promise<void>;
+  removeAddedSlide(deckId: string, slideId: string): Promise<void>;
   /**
    * Every comment currently in the implementation queue, sorted oldest
    * first. The compile-prompt button reads this and concatenates the
@@ -103,6 +123,18 @@ export interface CommentsStore {
     content: unknown,
     publishedBy: string
   ): Promise<PublishedContent>;
+}
+
+/**
+ * One entry in the "added placeholder slides" overlay. Structural only —
+ * an id and where it sits. The host turns this into a real placeholder
+ * slide; chrome never holds slide content here.
+ */
+export interface AddedSlide {
+  /** Generated id for the new placeholder slide. */
+  id: string;
+  /** Insert directly after this source slide id, or null for top of deck. */
+  afterId: string | null;
 }
 
 /** Envelope around a published snapshot. */
@@ -141,12 +173,17 @@ const k = {
   /** SET of comment ids the creative has triaged into the "implement next" queue. */
   queued: (deckId: string) => `comments:${deckId}:queued`,
   /**
-   * SET of slide ids the curator has marked deleted. Applied as a
-   * staging-only filter by renderDeckPage so the UI feels instant —
-   * the slide vanishes the moment the curator hits delete, while a
-   * Claude PR catches up in the background to remove it from source.
+   * SET of slide ids the curator has marked deleted. Authoritative —
+   * renderDeckPage filters these out of staging instantly and PUSH
+   * bakes them out of the production snapshot. No source-convergence PR.
    */
   deletedSlides: (deckId: string) => `comments:${deckId}:deleted-slides`,
+  /**
+   * STRING (JSON) — ordered array of `AddedSlide` entries the curator
+   * has inserted. Structural + id-based; the host materializes a
+   * placeholder slide per entry. Same authoritative model as deleted.
+   */
+  addedSlides: (deckId: string) => `comments:${deckId}:added-slides`,
 };
 
 // ─── JSON helpers ─────────────────────────────────────────────────────
@@ -370,6 +407,27 @@ class RedisCommentsStore implements CommentsStore {
   async unmarkSlideDeleted(deckId: string, slideId: string): Promise<void> {
     await this.redis.srem(k.deletedSlides(deckId), slideId);
   }
+
+  async getAddedSlides(deckId: string): Promise<AddedSlide[]> {
+    const parsed = parseJson<AddedSlide[]>(
+      await this.redis.get(k.addedSlides(deckId))
+    );
+    return Array.isArray(parsed) ? parsed : [];
+  }
+
+  async addSlide(deckId: string, entry: AddedSlide): Promise<void> {
+    const current = await this.getAddedSlides(deckId);
+    if (current.some((e) => e.id === entry.id)) return; // idempotent
+    current.push(entry);
+    await this.redis.set(k.addedSlides(deckId), JSON.stringify(current));
+  }
+
+  async removeAddedSlide(deckId: string, slideId: string): Promise<void> {
+    const current = await this.getAddedSlides(deckId);
+    const next = current.filter((e) => e.id !== slideId);
+    if (next.length === current.length) return; // nothing to remove
+    await this.redis.set(k.addedSlides(deckId), JSON.stringify(next));
+  }
 }
 
 // ─── Memory implementation ─────────────────────────────────────────────
@@ -540,6 +598,26 @@ class MemoryCommentsStore implements CommentsStore {
 
   async unmarkSlideDeleted(deckId: string, slideId: string): Promise<void> {
     this.deletedSlideOverlays.get(deckId)?.delete(slideId);
+  }
+
+  private addedSlideOverlays = new Map<string, AddedSlide[]>();
+
+  async getAddedSlides(deckId: string): Promise<AddedSlide[]> {
+    return [...(this.addedSlideOverlays.get(deckId) ?? [])];
+  }
+
+  async addSlide(deckId: string, entry: AddedSlide): Promise<void> {
+    const current = this.addedSlideOverlays.get(deckId) ?? [];
+    if (current.some((e) => e.id === entry.id)) return; // idempotent
+    this.addedSlideOverlays.set(deckId, [...current, entry]);
+  }
+
+  async removeAddedSlide(deckId: string, slideId: string): Promise<void> {
+    const current = this.addedSlideOverlays.get(deckId) ?? [];
+    this.addedSlideOverlays.set(
+      deckId,
+      current.filter((e) => e.id !== slideId)
+    );
   }
 }
 

@@ -18,6 +18,17 @@ Pitchcraft is a **controlled creative-deck system for high-control teams.** It e
 
 The whole system is about **funnelling feedback into an intentional, auditable loop** that ends with a deliberate publish — not a free-for-all CMS or a Figma clone.
 
+### The feel: immediate and intuitive
+
+Pitchcraft is a tool for producers and designers, not engineers. Inside the review interface, **every action is immediate.** Delete a slide and it's gone. Add one and it's there. Drag to reorder and it's reordered. None of these ever ask the user to understand, follow, or merge a pull request — that's a developer's concern and it must never surface mid-review.
+
+The dividing line:
+
+- **Structural review operations** — add slide, delete slide, reorder — are **live database state** (Redis overlays). Instant in staging, baked into production on PUSH. No Claude, no PR, no merge, ever.
+- **Content/design authoring** — writing copy, restyling, implementing a creative comment ("make this headline bigger") — is genuine code. That still goes through the comment → Claude → PR loop, because it's a real source change that deserves review.
+
+If a structural operation ever grows a PR/merge/"converge source" step, that's a regression. Rip it out. *Review behavior is instant; only authoring touches git.*
+
 ---
 
 ## 1.1 The three layers
@@ -165,14 +176,16 @@ If `getStore` or any ioredis-dependent symbol ever leaks into the client barrel,
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Two views, two sources of truth, two gates:
+The loop above is the path for **content** changes — copy, design, anything that's genuinely code. **Structural** changes (add / delete / reorder a slide) skip Claude entirely: they're instant Redis overlays applied on top of source. They show in staging immediately and are baked into the production snapshot when the creative hits PUSH.
 
-| View          | Reads from                  | Visible to                        |
-| ------------- | --------------------------- | --------------------------------- |
-| `/staging`    | `deck.content.ts` live      | Creative + invited stakeholders   |
-| `/` (prod)    | Redis snapshot (or source)  | Clients (signed-in via Google)    |
+Two views, two sources of truth, one gate:
 
-The PUSH button is the gate between the two. Staging churns; production stays frozen until the creative deliberately pushes.
+| View          | Reads from                                  | Visible to                        |
+| ------------- | ------------------------------------------- | --------------------------------- |
+| `/staging`    | `deck.content.ts` live **+ overlays**       | Creative + invited stakeholders   |
+| `/` (prod)    | Redis snapshot (effective state, or source) | Clients (signed-in via Google)    |
+
+The PUSH button is the gate between the two. Staging churns (source edits *and* live overlays); production stays frozen until the creative deliberately pushes — at which point the snapshot captures the **effective staging state**: source with deletions removed, additions spliced in, producer reorder applied. What you saw in staging is exactly what ships.
 
 ---
 
@@ -208,6 +221,7 @@ The PUSH button is the gate between the two. Staging churns; production stays fr
 - ❌ Draft / Review / Approved slide-status pill — removed. Visibility is now driven by the PUSH gate and the `visibility` field, not per-slide status.
 - ❌ Per-slide status overlay storage — gone from chrome + host.
 - ❌ Top-bar PUSH button — moved into the floating cluster with Comments + Export.
+- ❌ **Slide add/delete via Claude PR** — removed. Adding or deleting a slide used to dispatch a GitHub issue → Claude PR → merge → redeploy, with a "pending PR" strip in the outline. That dragged git into a producer's face for a one-click structural op. Replaced by instant Redis overlays (see §4, §6.3). The PR/merge step now exists *only* for content/design authoring. Do not re-add a "source convergence" PR for structural ops.
 - ❌ Wide letter-spaced uppercase labels in chrome (`tracking-[0.28em]` etc.) — stripped from all chrome UI. Slide typography (cover eyebrows, statement labels) keeps its tracking because that's deck design, not chrome.
 
 ---
@@ -250,8 +264,9 @@ These are the **invariants the Core enforces**. Skinning them is fine (Review In
 - An **`@mention`** by any role fires a Slack DM to the mentioned user (when token configured).
 - The **role flow** is creative / producer / client, chosen once per deck, stored server-side, stamped on every comment they post.
 - The **triage queue** is a curator-only side-index of comment ids flagged for implementation.
-- **Send to Claude** opens a GitHub issue with the compiled prompt; the workflow opens a PR.
-- **PUSH** snapshots `deck.content.ts` into Redis; production reads the snapshot.
+- **Send to Claude** opens a GitHub issue with the compiled prompt; the workflow opens a PR. This is for *content/design* changes only.
+- **Structural slide ops** (add / delete / reorder) are instant Redis overlays — never a Claude PR. Add records `{id, afterId}`; delete records an id; reorder records an id order. The host materializes/filters slides from these at render time.
+- **PUSH** snapshots the **effective staging state** (`deck.content.ts` with the structural overlays applied) into Redis; production reads the snapshot. Overlays are *not* cleared on PUSH — they remain the live truth until source is reconciled through deliberate authoring.
 - The **owner allowlist** (`NEXT_PUBLIC_DECK_OWNER_EMAILS`) gates `canCurate` (triage, send, publish).
 - All persistence is **namespaced by `deckId`** in Redis. Decks never share state.
 
@@ -287,9 +302,10 @@ These are foot-guns we've hit. Document them once; never hit them again.
 | Edit/delete own comments        |    ✅    |    ✅    |   ✅   |                                           |
 | Resolve any comment             |    ✅    |    ✅    |   ✅   | Honor system — anyone can resolve         |
 | Drag-reorder slides (overlay)   |    ✅    |    ✅    |   ❌   | Stored in KV; never touches source        |
+| Add / delete slides (overlay)   |    ✅    |    ❌    |   ❌   | Instant Redis overlay; no PR. Creative-only |
 | Queue a comment for Claude      |    ✅    |    ❌    |   ❌   | Sticky bar only visible to creative       |
-| Send queue to Claude (PR)       |    ✅    |    ❌    |   ❌   | Creates GitHub issue → action → PR        |
-| Push to production              |    ✅    |    ❌    |   ❌   | Snapshots `deck.content.ts` to Redis      |
+| Send queue to Claude (PR)       |    ✅    |    ❌    |   ❌   | Content/design changes only → issue → PR  |
+| Push to production              |    ✅    |    ❌    |   ❌   | Snapshots effective staging state to Redis |
 | Edit `deck.content.ts`          |    ✅    |    ❌    |   ❌   | Via Claude or manually in editor          |
 
 The `canCurate` gate (creative role + email in `NEXT_PUBLIC_DECK_OWNER_EMAILS`) controls all high-trust actions. Producers/clients never see those affordances in the DOM — the chrome components self-gate.
@@ -331,6 +347,7 @@ If a future session proposes any of these, push back hard.
 - **"Let's change how comments work for this client"** — no. See §1.1 + §6.3. Pitchcraft Core never varies per deck.
 - **"Let's bypass the PUSH gate for emergencies"** — no. The PUSH gate is the entire point of the staging/production split.
 - **"Let's add a second 'send' mechanism for X scenario"** — collapse, don't multiply. Every new send button is a new mental surface.
+- **"Let's route this structural op (add/delete/reorder) through a Claude PR / source-convergence step"** — no. See §1 + §4. Structural review ops are instant overlays. Only content/design authoring touches git. A PR/merge step on a one-click structural action is the exact "dev hellscape" this tool exists to avoid.
 - **"Let's add a database for X (not Redis)"** — Redis is the only persistence. If a need arises it can't model, we discuss in this document first.
 - **"Let's let chrome import `DeckSlide`"** — no. Chrome is content-agnostic. It speaks in `slideId: string` and that's it.
 - **"Let's hardcode a deck-specific value in chrome"** — chrome is shared by all decks. Per-deck variability lives in the Deck Skin (the host's `content/` and `components/deck/slides/`), not in chrome.

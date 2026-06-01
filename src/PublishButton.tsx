@@ -155,8 +155,8 @@ function PublishConfirmModal({
         </h2>
         <p className="mt-2 text-[12.5px] leading-relaxed text-black/65">
           Replaces what visitors see at <code>/</code> with the current
-          contents of <code>deck.content.ts</code>. The staging view
-          stays live and unchanged.
+          state of staging — every edit, deletion, addition, and reorder
+          included. Staging stays live and unchanged.
         </p>
 
         {lastPublished && (
