@@ -66,10 +66,26 @@ export function CommentBadge({
             key="count"
             initial={{ width: 0, marginRight: 0, opacity: 0 }}
             animate={{ width: discWidth, marginRight: 8, opacity: 1 }}
-            exit={{ width: 0, marginRight: 0, opacity: 0 }}
+            exit={{
+              width: 0,
+              marginRight: 0,
+              opacity: 0,
+              // Exit collapses + fades a touch quicker than it entered —
+              // chrome convention: exits beat entrances.
+              transition: {
+                duration: CHROME_DURATION.popover,
+                ease: CHROME_EASE.exit,
+              },
+            }}
             transition={{
-              duration: CHROME_DURATION.popover,
-              ease: CHROME_EASE.standard,
+              // Width + margin drive the smooth pill growth on the snappy
+              // popover timing. Opacity gets its own, slightly longer and
+              // evenly-eased pass so the circle reads as a genuine fade
+              // in/out (carrying the number with it) rather than a hard
+              // wipe synced to the width.
+              width: { duration: CHROME_DURATION.popover, ease: CHROME_EASE.standard },
+              marginRight: { duration: CHROME_DURATION.popover, ease: CHROME_EASE.standard },
+              opacity: { duration: CHROME_DURATION.panel, ease: CHROME_EASE.standard },
             }}
             className="relative inline-flex h-[18px] shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#111] text-[10px] font-semibold leading-none tabular-nums text-white ring-1 ring-white/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
           >
