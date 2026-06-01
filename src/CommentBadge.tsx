@@ -57,8 +57,9 @@ export function CommentBadge({
           the button widens through normal flow and `Comments` glides
           over without any stretch or snap. `overflow-hidden` clips the
           numeral while the disc is mid-grow and powers the roll below.
-          tabular-nums + the 1.5px nudge handle Suisse Intl's
-          left-leaning numeral sidebearings. */}
+          The numeral is centered purely by flex (tabular-nums keeps the
+          advance stable across digits) — no manual translate nudge,
+          which is what was knocking it off-center. */}
       <AnimatePresence initial={false}>
         {open > 0 && (
           <motion.span
@@ -87,7 +88,7 @@ export function CommentBadge({
                   duration: CHROME_DURATION.thread,
                   ease: CHROME_EASE.standard,
                 }}
-                className="block translate-x-[1.5px] tabular-nums"
+                className="block text-center leading-none tabular-nums"
               >
                 {display}
               </motion.span>

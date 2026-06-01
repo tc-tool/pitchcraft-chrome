@@ -6,7 +6,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePublish } from "./usePublish";
 import { useCurrentUser } from "./useCurrentUser";
 import { canCurate } from "./permissions";
-import { CHROME_PILL_BASE, CHROME_PILL_HOVER } from "./surfaceTokens";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
 
 interface PublishButtonProps {
@@ -77,13 +76,20 @@ export function PublishButton({
 
   return (
     <div className={`relative ${className}`}>
+      {/* PUSH is the one consequential, "ship to production" action, so
+          it deliberately departs from the frosted utility pills
+          (Comments, Export) and takes the dark primary treatment from
+          the design system. The solid #111 capsule with a white hairline
+          ring + soft shadow reads cleanly on the black deck and pulls the
+          eye as the deliberate action it is. The up-arrow lifts a hair on
+          hover — a quiet nod to "push up". */}
       <button
         type="button"
         onClick={() => setConfirmOpen(true)}
         disabled={isPublishing}
-        className={`inline-flex h-[34px] items-center gap-2 rounded-full px-4 text-[10px] font-medium uppercase text-[#444] ${CHROME_PILL_BASE} ${CHROME_PILL_HOVER} disabled:opacity-60 disabled:cursor-wait`}
+        className="group inline-flex h-[34px] items-center gap-1.5 rounded-full bg-[#111] pl-3.5 pr-4 text-[10px] font-medium uppercase text-white ring-1 ring-white/[0.16] shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_3px_12px_rgba(0,0,0,0.42)] transition-[transform,background-color,box-shadow,ring-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-black hover:ring-white/[0.30] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_10px_26px_rgba(0,0,0,0.55)] active:translate-y-0 active:duration-100 disabled:opacity-60 disabled:cursor-wait"
       >
-        <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+        <PushGlyph pushed={justPublished} />
         {justPublished ? "Pushed" : label}
       </button>
 
@@ -104,6 +110,44 @@ export function PublishButton({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// ─── Push glyph ───────────────────────────────────────────────────────
+//
+// Up-arrow by default (nudges up on hover via the parent's `group`),
+// swapping to a checkmark for the brief "Pushed" success window. Drawn
+// with currentColor so it inherits the button's white ink.
+
+function PushGlyph({ pushed }: { pushed: boolean }) {
+  const common = {
+    width: 12,
+    height: 12,
+    viewBox: "0 0 16 16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  if (pushed) {
+    return (
+      <svg {...common}>
+        <path d="M3.5 8.5l3 3 6-7" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      {...common}
+      className="transition-transform duration-150 ease-out group-hover:-translate-y-px"
+    >
+      <path d="M8 13V3.5" />
+      <path d="M3.75 7.75 8 3.5l4.25 4.25" />
+    </svg>
   );
 }
 
