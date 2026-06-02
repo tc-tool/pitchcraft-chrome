@@ -79,15 +79,16 @@ export const CHROME_PILL_HOVER =
 /**
  * macOS-style dock shell — the rounded-rectangle frosted container that
  * holds bare controls. Same cool palette + hairline ring as the panel
- * and pills, but with a softer corner radius and a deeper drop shadow so
- * the cluster reads as one floating glass slab. The controls inside are
- * "bare" (CHROME_DOCK_ITEM*) so this container is the only glass.
+ * and pills. The corner radius (`rounded-2xl`, 16px) is deliberately well
+ * under half the dock's height so it reads as a clear rounded RECTANGLE,
+ * not a pill/stadium — the macOS dock look. A deep drop shadow floats it
+ * as one glass slab; the controls inside are "bare" (CHROME_DOCK_ITEM*)
+ * so this container is the only glass.
  *
- * Used by the host's SlideChromeGroup for both the persistent dock and
- * the editing-tools mini-dock; exported so the two never drift.
+ * Used by the host's SlideChromeGroup for the persistent dock.
  */
 export const CHROME_DOCK_SURFACE =
-  "rounded-[22px] bg-[rgba(244,249,254,0.7)] backdrop-blur-xl backdrop-saturate-150 ring-1 ring-black/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_10px_34px_rgba(0,0,0,0.20)]";
+  "rounded-2xl bg-[rgba(244,249,254,0.7)] backdrop-blur-xl backdrop-saturate-150 ring-1 ring-black/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_10px_34px_rgba(0,0,0,0.20)]";
 
 /**
  * Bare dock-item base — a transparent control that sits *inside* a
