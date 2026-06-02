@@ -94,7 +94,9 @@ When a change is proposed, ask:
 
 Anything in this list should be **actively refused** unless we formally amend this document.
 
-1. **Not a visual editor.** No drag-to-resize, no inline rich-text WYSIWYG, no color pickers, no font choosers. Visuals live in code; the chrome is for feedback only.
+1. **Not a visual editor.** No drag-to-resize, no inline rich-text WYSIWYG, no font choosers, no free-form style editing. Visuals live in code; the chrome is for feedback only.
+
+   **One deliberate exception (amended 2026-06): the deck-accent control.** A *single, creative-only* swatch sets one value — the deck's accent color (`meta.accent` → the `--deck-accent` CSS token) — through a Redis overlay, exactly like the reorder/delete overlays (instant in staging, baked into the production snapshot on PUSH). It is allowed because it is **one token, creative-gated, and the accent is a Deck-Skin concept the creative already owns** — and because the alternative (hand-editing source for every retint) fights the "immediate and intuitive" principle in §1. This is **not** a foothold for a general visual editor: no other visual property earns a GUI without a further amendment to this clause. Producers and clients never see the control.
 2. **Not a CMS.** Producers/clients can comment but never directly write to `deck.content.ts`. The only path to source is the creative + Claude.
 3. **Not a Figma replacement.** No multi-cursor live editing. No vector tools. No artboards.
 4. **Not a fixed visual system at the deck level — and not a per-deck visual system at the review level.** Each pitch may flex wildly on its **Deck Skin** (slides, slide typography, brand world, motion, custom slide types). The **Review Interface** stays the same across every deck. The **Pitchcraft Core** never varies. See §1.1.
@@ -203,6 +205,8 @@ The PUSH button is the gate between the two. Staging churns (source edits *and* 
 - ✅ Send to Claude → GitHub issue → action → PR loop
 - ✅ Copy-to-clipboard fallback if creative wants to paste into a manual Claude Code session
 - ✅ PUSH (publish-to-production) snapshot gate
+- ✅ Fixed "Tool" upfront — standard agency-intro sections (incl. WebGL scenes) that open every deck; backdrop + slides retint from one accent token
+- ✅ Deck-accent control — single creative-only swatch (the §2.1 carve-out) sets `meta.accent`/`--deck-accent` via a Redis overlay; instant in staging, baked on PUSH
 - ✅ Factory script for one-shot deck spinup (~30 sec end-to-end excluding Google OAuth)
 - ✅ Custom subdomain per deck via Cloudflare CNAME + Railway service domain
 - ✅ Slack notifications, payment-free + zero per-deck setup
@@ -340,7 +344,7 @@ These need decisions before they balloon.
 
 If a future session proposes any of these, push back hard.
 
-- **"Let's add a quick visual editor for X"** — see §2.1. Visuals stay in code.
+- **"Let's add a quick visual editor for X"** — see §2.1. Visuals stay in code. The **only** carved-out exception is the single creative-only deck-accent control (§2.1); any *other* "let me tweak this visual property in a GUI" request is still a no without amending §2.1.
 - **"Let's let producers edit copy directly"** — see §2.2. The path to source is creative + Claude only.
 - **"Let's add a notifications inbox in the deck"** — see §2.5. Slack is the surface.
 - **"Let's restyle the comment panel for this deck"** — no. See §1.1 + §6.2. The Review Interface is shared by every deck. Restyle the Deck Skin, not the Review Interface.
