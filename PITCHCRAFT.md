@@ -98,6 +98,8 @@ Anything in this list should be **actively refused** unless we formally amend th
 
    **One deliberate exception (amended 2026-06): the deck-accent control.** A *single, creative-only* swatch sets one value — the deck's accent color (`meta.accent` → the `--deck-accent` CSS token) — through a Redis overlay, exactly like the reorder/delete overlays (instant in staging, baked into the production snapshot on PUSH). It is allowed because it is **one token, creative-gated, and the accent is a Deck-Skin concept the creative already owns** — and because the alternative (hand-editing source for every retint) fights the "immediate and intuitive" principle in §1. This is **not** a foothold for a general visual editor: no other visual property earns a GUI without a further amendment to this clause. Producers and clients never see the control.
 2. **Not a CMS.** Producers/clients can comment but never directly write to `deck.content.ts`. The only path to source is the creative + Claude.
+
+   **Bounded exception (amended 2026-06): the case-study picker.** Creative+producer may *select* (not author) past projects from Tool's own work archive (`toolofna.com/experience/work/`, read via its public WPGraphQL) and attach them as case-study slides at the end of the deck. This stays on the right side of "not a CMS" because: it's **selection from a fixed, external archive** (no free-form content authoring), it writes a **Redis overlay** (not `deck.content.ts`) that's baked into the snapshot on PUSH — the same model as the reorder/add-slide overlays — so **source is still only ever touched by creative + Claude**. It is not a license to hand-author arbitrary slide content through a GUI.
 3. **Not a Figma replacement.** No multi-cursor live editing. No vector tools. No artboards.
 4. **Not a fixed visual system at the deck level — and not a per-deck visual system at the review level.** Each pitch may flex wildly on its **Deck Skin** (slides, slide typography, brand world, motion, custom slide types). The **Review Interface** stays the same across every deck. The **Pitchcraft Core** never varies. See §1.1.
 5. **Not a notifications platform.** Slack DMs on `@mention` is the full surface; no inbox, no digest emails, no in-app activity feed.
@@ -207,6 +209,7 @@ The PUSH button is the gate between the two. Staging churns (source edits *and* 
 - ✅ PUSH (publish-to-production) snapshot gate
 - ✅ Fixed "Tool" upfront — standard agency-intro sections (incl. WebGL scenes) that open every deck; backdrop + slides retint from one accent token
 - ✅ Deck-accent control — single creative-only swatch (the §2.1 carve-out) sets `meta.accent`/`--deck-accent` via a Redis overlay; instant in staging, baked on PUSH
+- ✅ Case-study picker (the §2.2 carve-out) — creative+producer search Tool's experiential work archive (WPGraphQL) and attach projects as case-study slides before Thank-you; Redis overlay, instant in staging, baked on PUSH
 - ✅ Factory script for one-shot deck spinup (~30 sec end-to-end excluding Google OAuth)
 - ✅ Custom subdomain per deck via Cloudflare CNAME + Railway service domain
 - ✅ Slack notifications, payment-free + zero per-deck setup
@@ -345,7 +348,7 @@ These need decisions before they balloon.
 If a future session proposes any of these, push back hard.
 
 - **"Let's add a quick visual editor for X"** — see §2.1. Visuals stay in code. The **only** carved-out exception is the single creative-only deck-accent control (§2.1); any *other* "let me tweak this visual property in a GUI" request is still a no without amending §2.1.
-- **"Let's let producers edit copy directly"** — see §2.2. The path to source is creative + Claude only.
+- **"Let's let producers edit copy directly"** — see §2.2. The path to source is creative + Claude only. The lone carve-out is the case-study picker (§2.2): *selecting* fixed archive entries into an overlay is allowed; hand-authoring arbitrary slide copy through a GUI is not.
 - **"Let's add a notifications inbox in the deck"** — see §2.5. Slack is the surface.
 - **"Let's restyle the comment panel for this deck"** — no. See §1.1 + §6.2. The Review Interface is shared by every deck. Restyle the Deck Skin, not the Review Interface.
 - **"Let's change how comments work for this client"** — no. See §1.1 + §6.3. Pitchcraft Core never varies per deck.

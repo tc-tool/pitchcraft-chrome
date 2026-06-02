@@ -596,6 +596,65 @@ export async function accentDELETE(req: NextRequest) {
   return NextResponse.json({ ok: true });
 }
 
+// ─── Case-study overlay ───────────────────────────────────────────────
+//
+// The host's case-study picker browses an external work archive and
+// attaches chosen projects as slides at the end of the deck. The chosen
+// list lives in KV as an opaque JSON array — chrome doesn't interpret
+// the shape (same as the published snapshot); the host owns the
+// case-study schema and materializes each entry into a real slide at
+// render time, and bakes the run into the production snapshot on PUSH.
+//
+// Reads are public (the host needs the staging overlay at render time
+// and the picker fetches it on mount). Writes require creative OR
+// producer role — gated identically to the reorder overlay
+// (canReorderSlides), since attaching past work to the narrative is a
+// producer-friendly editorial capability, not a creative-only one.
+
+export async function caseStudiesGET(req: NextRequest) {
+  const url = new URL(req.url);
+  const deckId = url.searchParams.get("deckId");
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+  const caseStudies = await getStore().getCaseStudies(deckId);
+  return NextResponse.json({ caseStudies });
+}
+
+export async function caseStudiesPATCH(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "auth required" }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
+
+  const { deckId, caseStudies } = body as {
+    deckId?: string;
+    caseStudies?: unknown;
+  };
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+  if (!Array.isArray(caseStudies)) {
+    return NextResponse.json(
+      { error: "caseStudies must be an array" },
+      { status: 400 }
+    );
+  }
+
+  const userRecord = await getStore().getUser(deckId, session.user.email);
+  if (!canReorderSlides(session.user.email, userRecord?.role)) {
+    return NextResponse.json({ error: "not authorized" }, { status: 403 });
+  }
+
+  await getStore().setCaseStudies(deckId, caseStudies);
+  return NextResponse.json({ ok: true });
+}
+
 // ─── Publish — deck-level snapshot gate for the production view ──────
 //
 // `GET` is public — both staging and production read the snapshot to

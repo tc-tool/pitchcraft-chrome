@@ -109,6 +109,22 @@ export interface CommentsStore {
   addSlide(deckId: string, entry: AddedSlide): Promise<void>;
   removeAddedSlide(deckId: string, slideId: string): Promise<void>;
   /**
+   * "These case studies were attached" overlay. The host's case-study
+   * picker browses an external work archive and records the chosen
+   * projects here; the host materializes each into a real slide and
+   * appends the run just before the deck's closing slide. Same
+   * authoritative, instant-in-staging / baked-on-PUSH model as the
+   * added-slides overlay.
+   *
+   * Stored OPAQUE — chrome does not interpret the shape of each entry
+   * (same as `setPublishedContent`). The host owns the case-study
+   * schema; chrome just persists the JSON array. Order is pick order.
+   *
+   * Returns `[]` when unset.
+   */
+  getCaseStudies(deckId: string): Promise<unknown[]>;
+  setCaseStudies(deckId: string, list: unknown[]): Promise<void>;
+  /**
    * Every comment currently in the implementation queue, sorted oldest
    * first. The compile-prompt button reads this and concatenates the
    * bodies for the Claude handoff.
@@ -199,6 +215,12 @@ const k = {
    * placeholder slide per entry. Same authoritative model as deleted.
    */
   addedSlides: (deckId: string) => `comments:${deckId}:added-slides`,
+  /**
+   * STRING (JSON) — opaque array of case-study entries the host's picker
+   * has attached. Chrome doesn't interpret the shape; the host
+   * materializes each into a closing-run slide. Same model as added.
+   */
+  caseStudies: (deckId: string) => `comments:${deckId}:case-studies`,
 };
 
 // ─── JSON helpers ─────────────────────────────────────────────────────
@@ -456,6 +478,17 @@ class RedisCommentsStore implements CommentsStore {
     if (next.length === current.length) return; // nothing to remove
     await this.redis.set(k.addedSlides(deckId), JSON.stringify(next));
   }
+
+  async getCaseStudies(deckId: string): Promise<unknown[]> {
+    const parsed = parseJson<unknown[]>(
+      await this.redis.get(k.caseStudies(deckId))
+    );
+    return Array.isArray(parsed) ? parsed : [];
+  }
+
+  async setCaseStudies(deckId: string, list: unknown[]): Promise<void> {
+    await this.redis.set(k.caseStudies(deckId), JSON.stringify(list));
+  }
 }
 
 // ─── Memory implementation ─────────────────────────────────────────────
@@ -659,6 +692,16 @@ class MemoryCommentsStore implements CommentsStore {
       deckId,
       current.filter((e) => e.id !== slideId)
     );
+  }
+
+  private caseStudyOverlays = new Map<string, unknown[]>();
+
+  async getCaseStudies(deckId: string): Promise<unknown[]> {
+    return [...(this.caseStudyOverlays.get(deckId) ?? [])];
+  }
+
+  async setCaseStudies(deckId: string, list: unknown[]): Promise<void> {
+    this.caseStudyOverlays.set(deckId, [...list]);
   }
 }
 

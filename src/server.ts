@@ -39,6 +39,8 @@ export {
   accentGET,
   accentPATCH,
   accentDELETE,
+  caseStudiesGET,
+  caseStudiesPATCH,
   publishGET,
   publishPOST,
   queueGET,
