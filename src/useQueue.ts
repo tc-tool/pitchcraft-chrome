@@ -120,6 +120,42 @@ export function useQueue() {
   );
 
   /**
+   * Empty the whole queue in one click — the QueueBar's "Clear" action,
+   * for when the curator changes their mind about a batch. Optimistically
+   * empties locally (the bar disappears immediately), DELETEs the queue
+   * server-side, then fires a comments-changed refresh for each slide
+   * that had a queued comment so its per-comment QueueToggle re-reads the
+   * now-false flag (the comment-list hook only refreshes on a matching
+   * slideId, so a generic ping wouldn't reach them). Comments themselves
+   * are untouched — only their queue membership is removed.
+   */
+  const clear = useCallback(async () => {
+    setError(null);
+    const affectedSlides = Array.from(new Set(queue.map((c) => c.slideId)));
+    const prev = queue;
+    setQueue([]); // optimistic
+    try {
+      const res = await fetch(
+        `/api/comments/queue?deckId=${encodeURIComponent(deckId)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(body.error ?? `clear failed (${res.status})`);
+      }
+      for (const slideId of affectedSlides) notifyCommentsChanged(slideId);
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setQueue(prev); // restore on failure
+      await reload();
+      throw e;
+    }
+  }, [deckId, queue, reload]);
+
+  /**
    * Compile the queue into a markdown prompt for Claude.
    *
    * Format optimized for a fresh Claude Code session:
@@ -186,7 +222,7 @@ export function useQueue() {
     return lines.join("\n");
   }, [queue, deckId]);
 
-  return { queue, loading, error, toggle, reload, compile };
+  return { queue, loading, error, toggle, clear, reload, compile };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────

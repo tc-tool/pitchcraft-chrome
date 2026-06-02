@@ -747,3 +747,27 @@ export async function queueGET(req: NextRequest) {
   const queued = await getStore().listQueued(deckId);
   return NextResponse.json({ queued });
 }
+
+// DELETE empties the whole queue in one shot — the QueueBar's "Clear"
+// action, for when the curator changes their mind about a batch before
+// sending. Same creative-only gate as the GET; comments themselves are
+// untouched (only their `queued` flag is cleared).
+export async function queueDELETE(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "auth required" }, { status: 401 });
+  }
+
+  const deckId = new URL(req.url).searchParams.get("deckId");
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+
+  const userRecord = await getStore().getUser(deckId, session.user.email);
+  if (!canCurate(session.user.email, userRecord?.role)) {
+    return NextResponse.json({ error: "not authorized" }, { status: 403 });
+  }
+
+  await getStore().clearQueue(deckId);
+  return NextResponse.json({ ok: true });
+}

@@ -28,7 +28,7 @@ interface QueueBarProps {
  */
 export function QueueBar({ deckTitle }: QueueBarProps) {
   const { user } = useCurrentUser();
-  const { queue, compile } = useQueue();
+  const { queue, compile, clear } = useQueue();
   const [modalOpen, setModalOpen] = useState(false);
 
   if (!user || !canCurate(user.email, user.role)) return null;
@@ -52,13 +52,25 @@ export function QueueBar({ deckTitle }: QueueBarProps) {
             <span className="font-medium text-[#111]">{queue.length}</span>{" "}
             queued for Claude
           </div>
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="rounded-full bg-[#111] px-3.5 py-1.5 text-[11.5px] font-medium text-white transition-colors hover:bg-black"
-          >
-            Send to Claude →
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* Pull the batch back — un-queues every comment (the comments
+                stay; only their queue membership is removed). Quiet text
+                button so it never competes with Send. */}
+            <button
+              type="button"
+              onClick={() => void clear()}
+              className="rounded-full px-3 py-1.5 text-[11.5px] font-medium text-black/55 transition-colors hover:bg-black/[0.05] hover:text-black/80"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="rounded-full bg-[#111] px-3.5 py-1.5 text-[11.5px] font-medium text-white transition-colors hover:bg-black"
+            >
+              Send to Claude →
+            </button>
+          </div>
         </div>
       </motion.div>
 

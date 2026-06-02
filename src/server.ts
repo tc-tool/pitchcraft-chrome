@@ -44,6 +44,7 @@ export {
   publishGET,
   publishPOST,
   queueGET,
+  queueDELETE,
 } from "./routeHandlers";
 
 // "Send the triage queue to Claude" — creates a labeled GitHub issue

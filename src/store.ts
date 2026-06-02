@@ -131,6 +131,14 @@ export interface CommentsStore {
    */
   listQueued(deckId: string): Promise<Comment[]>;
   /**
+   * Empty the implementation queue in one shot — clears the `queued`
+   * flag on every queued comment record AND drops the side-index set.
+   * The comments themselves are untouched; only their queue membership
+   * is removed. Backs the QueueBar's "Clear" action for when the curator
+   * changes their mind about a batch before sending it to Claude.
+   */
+  clearQueue(deckId: string): Promise<void>;
+  /**
    * Published deck content snapshot.
    *
    * The creative's "Publish" action serializes the host's current
@@ -445,6 +453,28 @@ class RedisCommentsStore implements CommentsStore {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  async clearQueue(deckId: string): Promise<void> {
+    const ids = await this.redis.smembers(k.queued(deckId));
+    if (ids.length === 0) return;
+    // Flip the queued flag off on each comment record (so the
+    // per-comment QueueToggle reflects the cleared state), then drop the
+    // whole side-index set in the same pipeline.
+    const itemKeys = ids.map((id) => k.item(deckId, id));
+    const blobs = await this.redis.mget(...itemKeys);
+    const pipeline = this.redis.pipeline();
+    blobs.forEach((b, i) => {
+      const existing = parseJson<Comment>(b);
+      if (existing) {
+        pipeline.set(
+          k.item(deckId, ids[i]),
+          JSON.stringify({ ...existing, queued: false })
+        );
+      }
+    });
+    pipeline.del(k.queued(deckId));
+    await pipeline.exec();
+  }
+
   async getDeletedSlides(deckId: string): Promise<Set<string>> {
     const ids = await this.redis.smembers(k.deletedSlides(deckId));
     return new Set(ids);
@@ -656,6 +686,14 @@ class MemoryCommentsStore implements CommentsStore {
     return Array.from(this.comments.values())
       .filter((c) => c.deckId === deckId && c.queued)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async clearQueue(deckId: string): Promise<void> {
+    for (const [key, c] of this.comments) {
+      if (c.deckId === deckId && c.queued) {
+        this.comments.set(key, { ...c, queued: false });
+      }
+    }
   }
 
   private deletedSlideOverlays = new Map<string, Set<string>>();
