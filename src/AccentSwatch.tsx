@@ -24,6 +24,13 @@ interface AccentSwatchProps {
    * framed pill.
    */
   bare?: boolean;
+  /**
+   * Suggested swatches shown in the popover. The host passes colors
+   * derived from the deck's own palette so the suggestions belong to THIS
+   * presentation; chrome stays content-agnostic and just renders the
+   * array. Defaults to a generic built-in set when the host supplies none.
+   */
+  presets?: string[];
 }
 
 /**
@@ -34,10 +41,11 @@ interface AccentSwatchProps {
 const DEFAULT_ACCENT = "#E91647";
 
 /**
- * Five quiet presets — a saturated brand red, two blues (one electric,
- * one cyan), a green, and near-black. Curated rather than a full
- * palette: the picker is for dialing a deck's defining accent, not for
- * fine-grained color work (the native <input type="color"> covers that).
+ * Generic fallback swatches, used only when the host doesn't supply
+ * deck-derived suggestions via the `presets` prop. A saturated brand red,
+ * two blues, a green, and near-black — curated rather than a full palette:
+ * the picker is for dialing a deck's defining accent, not fine-grained
+ * color work (the native <input type="color"> covers that).
  */
 const PRESETS = ["#E91647", "#1E5BFF", "#00C4FF", "#16A34A", "#111111"];
 
@@ -58,7 +66,11 @@ const PRESETS = ["#E91647", "#1E5BFF", "#00C4FF", "#16A34A", "#111111"];
  * else, so the pill simply doesn't exist in the DOM for
  * producers / clients. Mirrors PublishButton's self-gating exactly.
  */
-export function AccentSwatch({ className = "", bare = false }: AccentSwatchProps) {
+export function AccentSwatch({
+  className = "",
+  bare = false,
+  presets = PRESETS,
+}: AccentSwatchProps) {
   const { user } = useCurrentUser();
   const { accent, setAccent, clearAccent, busy } = useAccent();
   const [open, setOpen] = useState(false);
@@ -92,6 +104,7 @@ export function AccentSwatch({ className = "", bare = false }: AccentSwatchProps
         {open && (
           <AccentPopover
             current={current}
+            presets={presets}
             busy={busy}
             onPick={(color) => {
               void setAccent(color);
@@ -111,6 +124,7 @@ export function AccentSwatch({ className = "", bare = false }: AccentSwatchProps
 
 interface AccentPopoverProps {
   current: string;
+  presets: string[];
   busy: boolean;
   onPick: (color: string) => void;
   onReset: () => void;
@@ -119,6 +133,7 @@ interface AccentPopoverProps {
 
 function AccentPopover({
   current,
+  presets,
   busy,
   onPick,
   onReset,
@@ -205,9 +220,11 @@ function AccentPopover({
           />
         </div>
 
-        {/* Preset swatches. */}
-        <div className="mt-4 flex items-center gap-2">
-          {PRESETS.map((preset) => {
+        {/* Suggested swatches — host-supplied (derived from the deck's
+            own colors) or the generic built-in fallback. */}
+        <p className="mt-5 text-[11px] font-medium text-black/45">Suggested</p>
+        <div className="mt-2 flex items-center gap-2">
+          {presets.map((preset) => {
             const active = current.toLowerCase() === preset.toLowerCase();
             return (
               <button
