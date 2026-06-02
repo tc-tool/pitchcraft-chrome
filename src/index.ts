@@ -43,11 +43,17 @@ export { useSlideMutations } from "./useSlideMutations";
 export { usePublish } from "./usePublish";
 export type { PublishedContentSummary } from "./usePublish";
 export { useQueue } from "./useQueue";
+export { useAccent } from "./useAccent";
 
 // Deck-level "Publish to production" gate — gated identically to
 // canCurate (creative role + email allowlist). Renders nothing for
 // anyone else.
 export { PublishButton } from "./PublishButton";
+
+// Creative-only deck accent-color picker. Self-gates on canCurate —
+// renders nothing for producers / clients. Persists as a Redis overlay
+// (instant in staging) and is baked into the production snapshot on PUSH.
+export { AccentSwatch } from "./AccentSwatch";
 
 // Comment-triage UI — checkbox per comment + sticky "Send to Claude"
 // compile button + handoff modal. Same canCurate gate.

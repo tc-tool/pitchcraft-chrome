@@ -50,6 +50,19 @@ export interface CommentsStore {
   setReorder(deckId: string, slideIds: string[]): Promise<void>;
   clearReorder(deckId: string): Promise<void>;
   /**
+   * Deck accent-color overlay. When set, the host retints the deck with
+   * this color (the `--deck-accent` CSS var) in staging instantly; on
+   * PUSH the chosen accent is baked into the production snapshot's
+   * `meta.accent`. Creative-only write (same model as the reorder
+   * overlay). Stored as a plain color STRING — not JSON.
+   *
+   * Returns null if no overlay is set — the host falls back to the
+   * deck's source `meta.accent` (or its hardcoded default).
+   */
+  getAccent(deckId: string): Promise<string | null>;
+  setAccent(deckId: string, accent: string): Promise<void>;
+  clearAccent(deckId: string): Promise<void>;
+  /**
    * Toggle a comment's "queued for implementation" flag. Set on the
    * comment record itself AND maintained in a side-index set so the
    * queue can be listed without scanning every comment. Idempotent —
@@ -168,6 +181,8 @@ const k = {
   users: (deckId: string) => `comments:${deckId}:users`,
   /** STRING (JSON) — array of slide ids in producer-defined order, or unset. */
   reorder: (deckId: string) => `comments:${deckId}:reorder`,
+  /** STRING (plain color, NOT JSON) — deck accent overlay, or unset. */
+  accent: (deckId: string) => `comments:${deckId}:accent`,
   /** STRING (JSON) — published deck snapshot envelope, or unset. */
   published: (deckId: string) => `comments:${deckId}:published`,
   /** SET of comment ids the creative has triaged into the "implement next" queue. */
@@ -340,6 +355,19 @@ class RedisCommentsStore implements CommentsStore {
     await this.redis.del(k.reorder(deckId));
   }
 
+  async getAccent(deckId: string): Promise<string | null> {
+    // Plain string — ioredis returns the raw value (or null when unset).
+    return await this.redis.get(k.accent(deckId));
+  }
+
+  async setAccent(deckId: string, accent: string): Promise<void> {
+    await this.redis.set(k.accent(deckId), accent);
+  }
+
+  async clearAccent(deckId: string): Promise<void> {
+    await this.redis.del(k.accent(deckId));
+  }
+
   async getPublishedContent(
     deckId: string
   ): Promise<PublishedContent | null> {
@@ -436,6 +464,7 @@ class MemoryCommentsStore implements CommentsStore {
   private comments = new Map<string, Comment>();
   private users = new Map<string, UserRecord>();
   private reorders = new Map<string, string[]>();
+  private accents = new Map<string, string>();
 
   private key(deckId: string, id: string) {
     return `${deckId}:${id}`;
@@ -542,6 +571,18 @@ class MemoryCommentsStore implements CommentsStore {
 
   async clearReorder(deckId: string): Promise<void> {
     this.reorders.delete(deckId);
+  }
+
+  async getAccent(deckId: string): Promise<string | null> {
+    return this.accents.get(deckId) ?? null;
+  }
+
+  async setAccent(deckId: string, accent: string): Promise<void> {
+    this.accents.set(deckId, accent);
+  }
+
+  async clearAccent(deckId: string): Promise<void> {
+    this.accents.delete(deckId);
   }
 
   private publishedSnapshots = new Map<string, PublishedContent>();

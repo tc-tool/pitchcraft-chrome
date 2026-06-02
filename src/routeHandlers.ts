@@ -517,6 +517,85 @@ export async function reorderDELETE(req: NextRequest) {
   return NextResponse.json({ ok: true });
 }
 
+// ─── Deck accent overlay ──────────────────────────────────────────────
+//
+// Creative-only "deck accent color" picker. The overlay is a single
+// color string in KV; the host retints the deck via `--deck-accent` in
+// staging instantly and bakes the chosen accent into `meta.accent` of
+// the production snapshot on PUSH. Same persistence model as the
+// reorder overlay — live in staging, frozen into the snapshot on PUSH.
+//
+// Reads are public (the host needs the staging overlay at render time
+// and the client hook fetches it on mount). Writes are creative-only —
+// gated identically to publishing (canCurate), since accent is a
+// deck-wide creative decision, not a producer-friendly capability.
+
+export async function accentGET(req: NextRequest) {
+  const url = new URL(req.url);
+  const deckId = url.searchParams.get("deckId");
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+  const accent = await getStore().getAccent(deckId);
+  return NextResponse.json({ accent });
+}
+
+export async function accentPATCH(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "auth required" }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
+
+  const { deckId, accent } = body as { deckId?: string; accent?: unknown };
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+  if (typeof accent !== "string" || !accent.trim()) {
+    return NextResponse.json(
+      { error: "accent must be a color string" },
+      { status: 400 }
+    );
+  }
+
+  const userRecord = await getStore().getUser(deckId, session.user.email);
+  if (!canCurate(session.user.email, userRecord?.role)) {
+    return NextResponse.json({ error: "not authorized" }, { status: 403 });
+  }
+
+  await getStore().setAccent(deckId, accent.trim());
+  return NextResponse.json({ ok: true });
+}
+
+export async function accentDELETE(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "auth required" }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
+
+  const { deckId } = body as { deckId?: string };
+  if (!deckId) {
+    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  }
+
+  const userRecord = await getStore().getUser(deckId, session.user.email);
+  if (!canCurate(session.user.email, userRecord?.role)) {
+    return NextResponse.json({ error: "not authorized" }, { status: 403 });
+  }
+
+  await getStore().clearAccent(deckId);
+  return NextResponse.json({ ok: true });
+}
+
 // ─── Publish — deck-level snapshot gate for the production view ──────
 //
 // `GET` is public — both staging and production read the snapshot to
