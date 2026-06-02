@@ -6,12 +6,24 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useAccent } from "./useAccent";
 import { useCurrentUser } from "./useCurrentUser";
 import { canCurate } from "./permissions";
-import { CHROME_PILL_BASE, CHROME_PILL_HOVER } from "./surfaceTokens";
+import {
+  CHROME_PILL_BASE,
+  CHROME_PILL_HOVER,
+  CHROME_DOCK_ITEM,
+  CHROME_DOCK_ITEM_HOVER,
+} from "./surfaceTokens";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
 
 interface AccentSwatchProps {
   /** Optional className for the wrapping container (positioning hooks). */
   className?: string;
+  /**
+   * When true, renders the trigger as a transparent dock item (no frosted
+   * pill / hover lift) so a surrounding dock container is the only glass.
+   * The swatch dot + popover stay identical. Default false → the original
+   * framed pill.
+   */
+  bare?: boolean;
 }
 
 /**
@@ -46,7 +58,7 @@ const PRESETS = ["#E91647", "#1E5BFF", "#00C4FF", "#16A34A", "#111111"];
  * else, so the pill simply doesn't exist in the DOM for
  * producers / clients. Mirrors PublishButton's self-gating exactly.
  */
-export function AccentSwatch({ className = "" }: AccentSwatchProps) {
+export function AccentSwatch({ className = "", bare = false }: AccentSwatchProps) {
   const { user } = useCurrentUser();
   const { accent, setAccent, clearAccent, busy } = useAccent();
   const [open, setOpen] = useState(false);
@@ -62,7 +74,11 @@ export function AccentSwatch({ className = "" }: AccentSwatchProps) {
         onClick={() => setOpen(true)}
         data-print-hide
         aria-label="Deck accent color"
-        className={`inline-flex h-[34px] items-center gap-2 rounded-full px-4 text-[10px] uppercase font-medium text-[#444] ${CHROME_PILL_BASE} ${CHROME_PILL_HOVER}`}
+        className={
+          bare
+            ? `${CHROME_DOCK_ITEM} ${CHROME_DOCK_ITEM_HOVER}`
+            : `inline-flex h-[34px] items-center gap-2 rounded-full px-4 text-[10px] uppercase font-medium text-[#444] ${CHROME_PILL_BASE} ${CHROME_PILL_HOVER}`
+        }
       >
         <span
           aria-hidden

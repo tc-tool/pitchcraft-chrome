@@ -29,7 +29,14 @@ export { colorForAuthor, tintForAuthor, AUTHOR_PALETTE } from "./authorColor";
 // sitting next to CommentBadge) so the persistent slide pills all
 // read as the same system. Internal panel-only tokens stay private
 // to the module.
-export { CHROME_PILL_BASE, CHROME_PILL_HOVER } from "./surfaceTokens";
+export {
+  CHROME_PILL_BASE,
+  CHROME_PILL_HOVER,
+  CHROME_DOCK_SURFACE,
+  CHROME_DOCK_ITEM,
+  CHROME_DOCK_ITEM_HOVER,
+  CHROME_DOCK_ITEM_PRIMARY,
+} from "./surfaceTokens";
 
 // Motion language — exported so any chrome-adjacent UI in the host
 // (e.g. the deck's chrome bar, status pill, slide chrome group) can

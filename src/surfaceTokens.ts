@@ -75,3 +75,42 @@ export const CHROME_PILL_BASE =
  */
 export const CHROME_PILL_HOVER =
   "transition-[transform,background-color,box-shadow,color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-[rgba(244,249,254,0.82)] hover:text-[#111] hover:ring-black/[0.20] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_22px_rgba(0,0,0,0.14)] active:translate-y-0 active:duration-100 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_2px_8px_rgba(0,0,0,0.10)]";
+
+/**
+ * macOS-style dock shell — the rounded-rectangle frosted container that
+ * holds bare controls. Same cool palette + hairline ring as the panel
+ * and pills, but with a softer corner radius and a deeper drop shadow so
+ * the cluster reads as one floating glass slab. The controls inside are
+ * "bare" (CHROME_DOCK_ITEM*) so this container is the only glass.
+ *
+ * Used by the host's SlideChromeGroup for both the persistent dock and
+ * the editing-tools mini-dock; exported so the two never drift.
+ */
+export const CHROME_DOCK_SURFACE =
+  "rounded-[22px] bg-[rgba(244,249,254,0.7)] backdrop-blur-xl backdrop-saturate-150 ring-1 ring-black/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_10px_34px_rgba(0,0,0,0.20)]";
+
+/**
+ * Bare dock-item base — a transparent control that sits *inside* a
+ * CHROME_DOCK_SURFACE. No frosted surface of its own, no hover lift; the
+ * dock container provides the glass + separation. Hover is a quiet tonal
+ * wash (`hover:bg-black/[0.06]`) instead of the pill's translate.
+ *
+ * The bare variants of CommentBadge / AccentSwatch (and the host's
+ * Export / Work / Edit items) compose this. The dot/disc/glyph internals
+ * stay identical to the framed variant — only the outer chrome swaps.
+ */
+export const CHROME_DOCK_ITEM =
+  "inline-flex h-9 items-center gap-1.5 rounded-[14px] px-3 text-[10px] font-medium uppercase transition-colors duration-150 ease-out";
+
+/** Tonal-wash hover for non-primary bare dock items. */
+export const CHROME_DOCK_ITEM_HOVER =
+  "text-[#555] hover:bg-black/[0.06] hover:text-[#111]";
+
+/**
+ * Primary bare dock item — the one emphasized "ship" control (PUSH).
+ * Stays a dark #111 filled rounded item even in the dock so it remains
+ * visually distinct, but drops the pill's white-ring/shadow capsule
+ * treatment (the dock container handles separation).
+ */
+export const CHROME_DOCK_ITEM_PRIMARY =
+  "inline-flex h-9 items-center gap-1.5 rounded-[14px] px-3.5 text-[10px] font-medium uppercase text-white bg-[#111] transition-colors duration-150 ease-out hover:bg-black";

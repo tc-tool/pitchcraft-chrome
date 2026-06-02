@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePublish } from "./usePublish";
 import { useCurrentUser } from "./useCurrentUser";
 import { canCurate } from "./permissions";
+import { CHROME_DOCK_ITEM_PRIMARY } from "./surfaceTokens";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
 
 interface PublishButtonProps {
@@ -24,6 +25,14 @@ interface PublishButtonProps {
    * Optional className for the wrapping container (positioning hooks).
    */
   className?: string;
+  /**
+   * When true, renders as the primary bare dock item — a dark #111
+   * filled rounded item (CHROME_DOCK_ITEM_PRIMARY) without the
+   * white-ring/shadow capsule treatment, so a surrounding dock container
+   * provides the separation. PUSH stays the one emphasized "ship"
+   * control either way. Default false → the original framed capsule.
+   */
+  bare?: boolean;
 }
 
 /**
@@ -47,6 +56,7 @@ export function PublishButton({
   content,
   label = "PUSH",
   className = "",
+  bare = false,
 }: PublishButtonProps) {
   const { user } = useCurrentUser();
   const { lastPublished, isPublishing, error, publish } = usePublish();
@@ -87,7 +97,16 @@ export function PublishButton({
         type="button"
         onClick={() => setConfirmOpen(true)}
         disabled={isPublishing}
-        className="group inline-flex h-[34px] items-center gap-1.5 rounded-full bg-[#111] pl-3.5 pr-4 text-[10px] font-medium uppercase text-white ring-1 ring-white/[0.16] shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_3px_12px_rgba(0,0,0,0.42)] transition-[transform,background-color,box-shadow,ring-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-black hover:ring-white/[0.30] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_10px_26px_rgba(0,0,0,0.55)] active:translate-y-0 active:duration-100 disabled:opacity-60 disabled:cursor-wait"
+        className={
+          bare
+            ? // Bare: primary dock item — dark #111 fill, no capsule
+              // ring/shadow/lift (the dock container separates it). Still
+              // the one emphasized "ship" control in the dock.
+              `group ${CHROME_DOCK_ITEM_PRIMARY} disabled:opacity-60 disabled:cursor-wait`
+            : // Framed: the standalone dark primary capsule with white
+              // hairline ring + soft shadow + hover lift.
+              "group inline-flex h-[34px] items-center gap-1.5 rounded-full bg-[#111] pl-3.5 pr-4 text-[10px] font-medium uppercase text-white ring-1 ring-white/[0.16] shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_3px_12px_rgba(0,0,0,0.42)] transition-[transform,background-color,box-shadow,ring-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-black hover:ring-white/[0.30] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_10px_26px_rgba(0,0,0,0.55)] active:translate-y-0 active:duration-100 disabled:opacity-60 disabled:cursor-wait"
+        }
       >
         <PushGlyph pushed={justPublished} />
         {justPublished ? "Pushed" : label}
