@@ -232,6 +232,84 @@ export function useCommentsForSlide(slideId: string) {
 }
 
 /**
+ * Deck-wide hook for *orphaned* threads — open top-level comments whose
+ * slide is no longer in the deck (the slide was deleted or removed from
+ * source). The per-slide panel can never surface these (their slide is
+ * never active), so the outline view lists them here instead of letting
+ * feedback silently vanish.
+ *
+ * Only fetches when `enabled` (the outline tab is open), so a deck-wide
+ * read doesn't fire on every panel open. Refreshes on the comments-change
+ * bus like the per-slide hook.
+ */
+export function useOrphanedThreads(
+  knownSlideIds: readonly string[],
+  enabled: boolean
+) {
+  const deckId = useDeckId();
+  const [comments, setComments] = useState<Comment[]>([]);
+  const known = useMemo(() => new Set(knownSlideIds), [knownSlideIds]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/comments?deckId=${encodeURIComponent(deckId)}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { comments?: Comment[] };
+      setComments(data.comments ?? []);
+    } catch {
+      /* ignore — orphan list is best-effort */
+    }
+  }, [deckId]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    void refresh();
+    return onCommentsChanged(() => void refresh());
+  }, [enabled, refresh]);
+
+  const orphaned: Comment[] = useMemo(
+    () =>
+      comments
+        .filter(
+          (c) => !c.parentId && c.status === "open" && !known.has(c.slideId)
+        )
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [comments, known]
+  );
+
+  const resolveOrphan = useCallback(
+    async (commentId: string) => {
+      const target = comments.find((c) => c.id === commentId);
+      // Optimistic — drop it from the open-orphan list immediately.
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === commentId
+            ? { ...c, status: "resolved" as CommentStatus }
+            : c
+        )
+      );
+      const res = await fetch(`/api/comments`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deckId, commentId, status: "resolved" }),
+      });
+      if (!res.ok) {
+        await refresh();
+        return;
+      }
+      if (target) notifyCommentsChanged(target.slideId);
+      await refresh();
+    },
+    [comments, deckId, refresh]
+  );
+
+  return { orphaned, resolveOrphan };
+}
+
+/**
  * Open *thread* count for a slide — replies don't add to the badge.
  * Used by CommentBadge to keep the per-slide indicator honest about
  * how many open conversations exist.

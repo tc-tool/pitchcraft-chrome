@@ -26,7 +26,7 @@ import {
   useMotionValue,
 } from "framer-motion";
 import { signIn, signOut, useSession } from "next-auth/react";
-import { useCommentsForSlide } from "./useCommentsClient";
+import { useCommentsForSlide, useOrphanedThreads } from "./useCommentsClient";
 import { useCurrentUser } from "./useCurrentUser";
 import { useDeckUsers } from "./useDeckUsers";
 import { useDeckId } from "./CommentsProvider";
@@ -177,6 +177,14 @@ export function CommentPanel({
     resolveComment,
     reopenComment,
   } = useCommentsForSlide(slideId);
+
+  // Orphaned threads (comments on slides that no longer exist). Only
+  // fetched while the outline tab is open. `outline.slides` is the set of
+  // slides that DO exist, so anything else is orphaned.
+  const { orphaned: orphanedComments, resolveOrphan } = useOrphanedThreads(
+    outline?.slides.map((s) => s.id) ?? [],
+    showOutlineTab && view === "outline"
+  );
 
   const deckId = useDeckId();
   const currentEmail = session?.user?.email?.toLowerCase() ?? null;
@@ -427,6 +435,11 @@ export function CommentPanel({
               // the user lands on the new slide's threads.
               setView("comments");
             }}
+          />
+          <OrphanedSection
+            orphaned={orphanedComments}
+            usersByEmail={usersByEmail}
+            onResolve={resolveOrphan}
           />
         </motion.div>
       ) : needsRole ? (
@@ -794,6 +807,74 @@ function ViewTabs({
       })}
     </div>
   );
+}
+
+// ─── Orphaned comments ──────────────────────────────────────────────────
+// Open comments whose slide was removed from the deck. Surfaced under the
+// outline so feedback on a deleted slide isn't lost — resolve to clear it.
+
+function OrphanedSection({
+  orphaned,
+  usersByEmail,
+  onResolve,
+}: {
+  orphaned: Comment[];
+  usersByEmail: Map<string, UserRecord>;
+  onResolve: (commentId: string) => Promise<void>;
+}) {
+  if (orphaned.length === 0) return null;
+  return (
+    <div className="mt-6 border-t border-black/[0.06] pt-5">
+      <div className="flex items-center gap-2">
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+        <h3 className="text-[11px] font-semibold uppercase text-[#555]">
+          Orphaned · {orphaned.length}
+        </h3>
+      </div>
+      <p className="mt-1 text-[12px] leading-relaxed text-black/55">
+        On slides that were removed. Resolve to clear.
+      </p>
+      <ul className="mt-3 flex flex-col gap-2">
+        {orphaned.map((c) => {
+          const author =
+            usersByEmail.get(c.authorEmail.toLowerCase())?.name ?? c.authorName;
+          return (
+            <li
+              key={c.id}
+              className="rounded-xl bg-black/[0.03] p-3 ring-1 ring-black/[0.05]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-black/45">
+                  on “{prettifySlideId(c.slideId)}”
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void onResolve(c.id)}
+                  className="shrink-0 text-[11px] text-[#555] underline-offset-2 transition-colors hover:text-[#111] hover:underline"
+                >
+                  Resolve
+                </button>
+              </div>
+              <p className="mt-1.5 text-[12px] font-medium text-[#111]">
+                {author}
+              </p>
+              <p className="mt-0.5 line-clamp-3 text-[13px] leading-relaxed text-black/75">
+                {c.body.replace(/<@([^>\s]+)>/g, "@$1")}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** kebab/snake slide id → Title Case label (chrome has no host schema). */
+function prettifySlideId(id: string): string {
+  return id
+    .split(/[-_]/)
+    .map((p) => (p ? p[0].toUpperCase() + p.slice(1) : p))
+    .join(" ");
 }
 
 function ThreadCard({
