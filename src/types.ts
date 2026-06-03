@@ -40,11 +40,17 @@ export type CommentAnchor =
 
 /**
  * Link back to the change that addressed a comment. Populated by the
- * traceability loop (queue dispatch + PR-merge webhook), not by users.
- * Built up in stages: dispatch stamps the issue; the webhook later adds
- * the PR + merge.
+ * traceability loop (instant apply + queue dispatch + deep-code webhook),
+ * not by users. Built up in stages and MERGED, never replaced: an instant
+ * apply stamps `appliedAt`; a dispatch stamps the issue; the webhook later
+ * adds the landed change. (See store.setResolution — it shallow-merges.)
  */
 export interface CommentResolution {
+  /**
+   * ISO 8601 — when this comment's feedback was applied via the instant
+   * copy path (§2.1, /api/deck/apply-feedback). The fast loop's trace.
+   */
+  appliedAt?: string;
   /** The triage issue this comment was dispatched to ("Send to Claude"). */
   issueNumber?: number;
   issueUrl?: string;
@@ -53,8 +59,14 @@ export interface CommentResolution {
   /** The PR that implemented it (set by the merge webhook — Phase 2b). */
   prNumber?: number;
   prUrl?: string;
-  /** ISO 8601 — when the PR merged. */
+  /**
+   * ISO 8601 — when the deep-code change landed (PR merged, or commit
+   * pushed direct to main). Stamped by the GitHub Action's callback to
+   * /api/github/heard. The "shipped" half of the loop.
+   */
   mergedAt?: string;
+  /** Commit/PR URL of the landed deep-code change, for the in-app link. */
+  landedUrl?: string;
 }
 
 export interface Comment {
@@ -162,6 +174,40 @@ export interface Thread {
 export interface NewCommentInput {
   slideId: string;
   body: string;
+}
+
+/** A slide referenced in a publish preview — id + a human title. */
+export interface PublishPreviewSlideRef {
+  id: string;
+  title: string;
+}
+
+/**
+ * Content-agnostic summary of what a PUSH will change vs what's currently
+ * live. The host computes it (only the host knows the slide schema and how
+ * to hash a slide's content); chrome's publish-confirm modal renders it.
+ * The contract is deliberately neutral — human-readable `lines` the modal
+ * lists verbatim, plus an optional per-slide `detail` for an expandable
+ * breakdown. Chrome never inspects slide internals.
+ */
+export interface PublishPreview {
+  /** No prior snapshot — the deck goes live for the first time. */
+  firstPublish: boolean;
+  /** The effective deck differs from what's published. */
+  hasChanges: boolean;
+  /** Slide count in the effective deck (what production will show). */
+  totalSlides: number;
+  /** Ready-to-render change lines, e.g. ["2 slides edited", "1 slide added"]. */
+  lines: string[];
+  /** Optional per-slide breakdown for an expandable detail view. */
+  detail?: {
+    added?: PublishPreviewSlideRef[];
+    removed?: PublishPreviewSlideRef[];
+    edited?: PublishPreviewSlideRef[];
+    reordered?: PublishPreviewSlideRef[];
+  };
+  /** Who/when the live snapshot was last published. */
+  lastPublished?: { publishedAt: string; publishedBy: string } | null;
 }
 
 /**

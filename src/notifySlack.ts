@@ -237,3 +237,110 @@ export async function notifySlackMention(
     )
   );
 }
+
+/**
+ * The kind of acknowledgement a "you were heard" ping carries — each maps
+ * to one rung of the review loop (PITCHCRAFT.md §4):
+ *   - applied:    instant copy edit landed on staging (§2.1 fast path)
+ *   - dispatched: feedback was sent to Claude as a triage issue
+ *   - shipped:    the deep-code change landed (commit on main / PR merged)
+ */
+export type HeardKind = "applied" | "dispatched" | "shipped";
+
+interface SlackHeardInput {
+  /** Comment authors to DM. Deduped + actor-excluded by the caller. */
+  recipients: Array<{ email: string; name?: string }>;
+  /** Deck title for the message header. */
+  deckTitle: string;
+  /** Direct URL back to the deck (used as the "Open in deck" link). */
+  deckUrl: string;
+  kind: HeardKind;
+  /**
+   * Optional context line — e.g. "issue #42", the slide title, or a count.
+   * Rendered in the context block under the headline.
+   */
+  detail?: string;
+}
+
+/**
+ * Collapse comments into unique "you were heard" recipients — one DM per
+ * person, the actor dropped (they triggered the action, so don't ping
+ * them about it), anything without an email skipped. Both top-level
+ * notes and replies count: anyone who spoke on the thread is owed the ack.
+ */
+export function heardRecipients(
+  comments: Array<{ authorEmail?: string; authorName?: string }>,
+  excludeEmail?: string | null
+): Array<{ email: string; name?: string }> {
+  const exclude = excludeEmail?.toLowerCase();
+  const byEmail = new Map<string, { email: string; name?: string }>();
+  for (const c of comments) {
+    const email = c.authorEmail?.toLowerCase();
+    if (!email || email === exclude) continue;
+    if (!byEmail.has(email)) byEmail.set(email, { email, name: c.authorName });
+  }
+  return [...byEmail.values()];
+}
+
+const HEARD_HEADLINE: Record<HeardKind, string> = {
+  applied: "Your note was applied",
+  dispatched: "Your note was sent to Claude",
+  shipped: "Your note shipped",
+};
+
+const HEARD_SUBTEXT: Record<HeardKind, string> = {
+  applied: "The copy edit is live on staging and bakes into the deck on the next publish.",
+  dispatched: "It's queued for Claude to implement — you'll hear again when it lands.",
+  shipped: "The change is in the deck.",
+};
+
+/**
+ * "You were heard" — DM the people who left feedback when the loop moves
+ * forward on their behalf. Closes the silence between leaving a comment and
+ * seeing it acted on. Fire-and-forget; reuses the same email→Slack-ID
+ * resolution and DM transport as @mention pings.
+ *
+ * Channel mode (SLACK_CHANNEL set) is deliberately NOT used here — a
+ * "your note was applied" ack is personal, not channel noise. We only DM,
+ * and only people who resolve to a Slack account.
+ */
+export async function notifySlackHeard(input: SlackHeardInput): Promise<void> {
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  if (!botToken) return; // bot not configured; silently skip
+
+  const { recipients, deckTitle, deckUrl, kind, detail } = input;
+  if (recipients.length === 0) return;
+
+  const slackIds = await Promise.all(
+    recipients.map((r) => lookupSlackUserId(r.email, botToken))
+  );
+  const targets = slackIds.filter((id): id is string => typeof id === "string");
+  if (targets.length === 0) return;
+
+  const headline = HEARD_HEADLINE[kind];
+  const subtext = HEARD_SUBTEXT[kind];
+  const contextBits = [detail, `<${deckUrl}|Open in deck →>`].filter(Boolean);
+
+  const blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `${headline} — *${deckTitle}*`,
+      },
+    },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: subtext },
+    },
+    {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: contextBits.join(" · ") }],
+    },
+  ];
+  const fallbackText = `${headline} — ${deckTitle}`;
+
+  await Promise.all(
+    targets.map((id) => postSlackMessage(id, blocks, fallbackText, botToken))
+  );
+}

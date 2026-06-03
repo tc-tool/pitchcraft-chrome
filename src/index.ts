@@ -12,7 +12,12 @@
  */
 
 // Client UI / hooks
-export { CommentsProvider, useDeckId } from "./CommentsProvider";
+export {
+  CommentsProvider,
+  useDeckId,
+  useCommentSurface,
+} from "./CommentsProvider";
+export type { CommentSurface } from "./CommentsProvider";
 export { CommentBadge } from "./CommentBadge";
 export { CommentPanel } from "./CommentPanel";
 export { SlidePinLayer } from "./SlidePinLayer";
@@ -81,6 +86,10 @@ export type {
   Comment,
   CommentRole,
   CommentStatus,
+  CommentAnchor,
   NewCommentInput,
   UserRecord,
+  PublishPreview,
+  PublishPreviewSlideRef,
 } from "./types";
+export { prettyAnchorPart } from "./anchorLabel";

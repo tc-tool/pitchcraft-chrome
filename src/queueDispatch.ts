@@ -3,6 +3,7 @@ import { auth } from "./authConfig";
 import { canCurate } from "./permissions";
 import { getStore } from "./store";
 import { createClaudeIssue, readDispatchConfig } from "./createClaudeIssue";
+import { notifySlackHeard, heardRecipients } from "./notifySlack";
 
 /**
  * Server route for the QueueBar "Send via GitHub" button.
@@ -105,8 +106,22 @@ export async function queueDispatchPOST(req: NextRequest) {
           })
         )
       );
+
+      // "You were heard" — DM everyone whose note just went to Claude
+      // (except the curator who dispatched it; they already know). The
+      // ack carries the issue number so the thread of trust is visible.
+      const actor = session.user.email.toLowerCase();
+      const recipients = heardRecipients(queued, actor);
+      const origin = new URL(req.url).origin;
+      void notifySlackHeard({
+        recipients,
+        deckTitle: friendlyTitle,
+        deckUrl: origin,
+        kind: "dispatched",
+        detail: `issue #${result.issueNumber}`,
+      });
     } catch {
-      /* stamping is best-effort */
+      /* stamping + notify are best-effort */
     }
 
     return NextResponse.json({

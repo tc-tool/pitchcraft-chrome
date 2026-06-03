@@ -352,7 +352,13 @@ class RedisCommentsStore implements CommentsStore {
       await this.redis.get(k.item(deckId, commentId))
     );
     if (!existing) return null;
-    const updated: Comment = { ...existing, resolution };
+    // Merge, never replace: resolution is built up in stages (appliedAt →
+    // issue → landed) by different code paths. A wholesale replace here
+    // would wipe an earlier stamp (e.g. dispatch clobbering an apply).
+    const updated: Comment = {
+      ...existing,
+      resolution: { ...existing.resolution, ...resolution },
+    };
     await this.redis.set(k.item(deckId, commentId), JSON.stringify(updated));
     return updated;
   }
@@ -683,7 +689,11 @@ class MemoryCommentsStore implements CommentsStore {
   ): Promise<Comment | null> {
     const existing = this.comments.get(this.key(deckId, commentId));
     if (!existing) return null;
-    const updated: Comment = { ...existing, resolution };
+    // Merge, never replace — see the Redis impl for why.
+    const updated: Comment = {
+      ...existing,
+      resolution: { ...existing.resolution, ...resolution },
+    };
     this.comments.set(this.key(deckId, commentId), updated);
     return updated;
   }

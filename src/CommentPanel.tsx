@@ -29,11 +29,13 @@ import { signIn, signOut, useSession } from "next-auth/react";
 import { useCommentsForSlide, useOrphanedThreads } from "./useCommentsClient";
 import { useCurrentUser } from "./useCurrentUser";
 import { useDeckUsers } from "./useDeckUsers";
-import { useDeckId } from "./CommentsProvider";
+import { useDeckId, useCommentSurface } from "./CommentsProvider";
+import { deckOwnerEmails } from "./permissions";
 import { useQueue } from "./useQueue";
 import { QueueToggle } from "./QueueToggle";
 import { QueueBar } from "./QueueBar";
 import { tintForAuthor } from "./authorColor";
+import { prettyAnchorPart } from "./anchorLabel";
 import { MentionableTextarea } from "./MentionableTextarea";
 import { renderBody } from "./renderBody";
 import {
@@ -203,6 +205,28 @@ export function CommentPanel({
 
   const deckId = useDeckId();
   const currentEmail = session?.user?.email?.toLowerCase() ?? null;
+
+  // ── Client surface (Phase 3) ─────────────────────────────────────────
+  // On the production (client) link, a signed-in viewer with no role IS a
+  // client — they got here via the link we share with clients. Auto-assign
+  // "client" instead of showing the team RolePicker (its creative/producer/
+  // client choice is a staging concept). Guard: never auto-demote a known
+  // deck owner (a creative who happened to open production first) — they
+  // still get the picker. Producers set their role on staging before ever
+  // reaching production, so they're unaffected in practice.
+  const surface = useCommentSurface();
+  const autoAssignClient =
+    surface === "production" &&
+    needsRole &&
+    !!currentEmail &&
+    !deckOwnerEmails().includes(currentEmail);
+
+  useEffect(() => {
+    if (!autoAssignClient) return;
+    void setRole("client").catch(() => {
+      /* best-effort — if it fails, the picker shows on the next render */
+    });
+  }, [autoAssignClient, setRole]);
 
   // Hydrate body from sessionStorage on mount so a draft typed on a
   // previous open of the panel is still here. Survives close/reopen
@@ -477,7 +501,7 @@ export function CommentPanel({
             onResolve={resolveOrphan}
           />
         </motion.div>
-      ) : needsRole ? (
+      ) : needsRole && !autoAssignClient ? (
         <motion.div
           key="picker"
           initial={{ opacity: 0, y: 4 }}
@@ -494,6 +518,20 @@ export function CommentPanel({
               await setRole(r);
             }}
           />
+        </motion.div>
+      ) : needsRole && autoAssignClient ? (
+        // Production auto-assigns "client" silently; this is the brief
+        // window while that POST is in flight. Flips to the comments view
+        // as soon as the role lands.
+        <motion.div
+          key="preparing"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: CHROME_DURATION.hover }}
+          className="px-6 py-12 text-center text-[13px] text-black/45"
+        >
+          Setting up your review…
         </motion.div>
       ) : (
         <motion.div
@@ -991,20 +1029,63 @@ function ThreadCard({
       onMouseLeave={isPinned ? () => onHover?.(null) : undefined}
       className="flex flex-col gap-2"
     >
+      {/* What this note is attached to, when it's an element anchor (the
+          inspect-element gesture). Shows the part; the full quoted text is
+          on hover. Region/slide anchors don't get a chip — a pin already
+          shows where they sit. */}
+      {parent.anchor?.scope === "element" && (
+        <div
+          className="flex items-center gap-1.5 self-start rounded-lg bg-[rgba(30,91,255,0.08)] px-2.5 py-1 text-[11px] font-medium text-[#1E5BFF] ring-1 ring-[rgba(30,91,255,0.18)]"
+          title={parent.anchor.quote ? `“${parent.anchor.quote}”` : undefined}
+        >
+          <span aria-hidden>⌖</span>
+          {prettyAnchorPart(parent.anchor.part)}
+        </div>
+      )}
       {changedSince && !isResolved && (
         <div className="flex items-center gap-1.5 self-start rounded-lg bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200/70">
           <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
           Slide changed since this note
         </div>
       )}
-      {parent.resolution?.issueUrl && (
+      {/* Instant copy edit landed (the §2.1 fast path). Emerald = done,
+          per the deck's semantic status colors. Non-link: there's no
+          external artifact — the edit is in the deck itself. */}
+      {parent.resolution?.appliedAt && (
+        <div className="flex items-center gap-1.5 self-start rounded-lg bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-800 ring-1 ring-emerald-200/70">
+          <svg
+            width={11}
+            height={11}
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M3 8.5l3.5 3.5L13 4.5" />
+          </svg>
+          Copy applied
+        </div>
+      )}
+      {/* Deep-code path. Blue while in flight ("Sent to Claude · #N"),
+          flips emerald once the change lands on main ("Shipped"). The
+          merge webhook (/api/github/heard) stamps mergedAt + landedUrl. */}
+      {(parent.resolution?.issueUrl || parent.resolution?.landedUrl) && (
         <a
-          href={parent.resolution.prUrl ?? parent.resolution.issueUrl}
+          href={
+            parent.resolution.landedUrl ??
+            parent.resolution.prUrl ??
+            parent.resolution.issueUrl
+          }
           target="_blank"
           rel="noreferrer"
-          // Traceability: links a comment to the work it kicked off. Shows
-          // the merged PR once known, else the triage issue it was sent to.
-          className="flex items-center gap-1.5 self-start rounded-lg bg-[rgba(30,91,255,0.08)] px-2.5 py-1 text-[11px] font-medium text-[#1E5BFF] ring-1 ring-[rgba(30,91,255,0.18)] transition-colors hover:bg-[rgba(30,91,255,0.14)]"
+          className={
+            parent.resolution.mergedAt
+              ? "flex items-center gap-1.5 self-start rounded-lg bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-800 ring-1 ring-emerald-200/70 transition-colors hover:bg-emerald-100"
+              : "flex items-center gap-1.5 self-start rounded-lg bg-[rgba(30,91,255,0.08)] px-2.5 py-1 text-[11px] font-medium text-[#1E5BFF] ring-1 ring-[rgba(30,91,255,0.18)] transition-colors hover:bg-[rgba(30,91,255,0.14)]"
+          }
         >
           <svg
             width={11}
@@ -1019,9 +1100,11 @@ function ThreadCard({
           >
             <path d="M5 11L11 5M6 5h5v5" />
           </svg>
-          {parent.resolution.prNumber
-            ? `Applied · PR #${parent.resolution.prNumber}`
-            : `Sent to Claude · #${parent.resolution.issueNumber}`}
+          {parent.resolution.mergedAt
+            ? "Shipped to the deck"
+            : parent.resolution.prNumber
+              ? `Applied · PR #${parent.resolution.prNumber}`
+              : `Sent to Claude · #${parent.resolution.issueNumber}`}
         </a>
       )}
       <CommentBlock
@@ -1477,7 +1560,7 @@ function EmptyState({ signedIn }: { signedIn: boolean }) {
         </p>
         <p className="max-w-[34ch] text-[13px] leading-relaxed text-[#666]">
           {signedIn
-            ? "Add a note below, or shift-click the slide to pin one to a spot."
+            ? "Add a note below, shift-click the slide to pin one to a spot, or alt-click any element to comment on it directly."
             : "Sign in below to leave a comment."}
         </p>
       </div>

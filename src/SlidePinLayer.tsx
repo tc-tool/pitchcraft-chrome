@@ -11,7 +11,20 @@ import {
   PANEL_SURFACE,
   SMALL_PRIMARY_BUTTON,
 } from "./surfaceTokens";
-import type { Thread } from "./types";
+import { prettyAnchorPart } from "./anchorLabel";
+import type { CommentAnchor, Thread } from "./types";
+
+/**
+ * A pending comment location. Always carries a normalized point (so it
+ * renders + composes exactly like a spatial pin); when it also carries an
+ * `anchor` it came from the inspect-element gesture (Alt-click a tagged
+ * element) and posts attached to that element, not just the point.
+ */
+export interface DraftPinTarget {
+  x: number;
+  y: number;
+  anchor?: CommentAnchor;
+}
 
 /** How long after creation a pin keeps pulsing to signal "freshly added." */
 const FRESH_PIN_MS = 3500;
@@ -38,8 +51,8 @@ export function SlidePinLayer({
 }: {
   slideId: string;
   isActive: boolean;
-  /** Ghost pin for an in-progress comment (before post). */
-  draftPin?: { x: number; y: number } | null;
+  /** Ghost pin for an in-progress comment (before post). May carry an anchor. */
+  draftPin?: DraftPinTarget | null;
   /** Called when the draft pin should be dismissed (cancel / post / outside click). */
   onClearDraftPin?: () => void;
   /** Click on a saved pin → bubbles up so the parent can open the panel scrolled to that thread. */
@@ -84,9 +97,21 @@ export function SlidePinLayer({
         <DraftPin
           x={draftPin.x}
           y={draftPin.y}
+          targetLabel={
+            draftPin.anchor?.scope === "element"
+              ? prettyAnchorPart(draftPin.anchor.part)
+              : null
+          }
           layerRef={layerRef}
           onPost={async (bodyText) => {
-            await addComment(bodyText, null, draftPin);
+            // Pin coords always travel (so it renders like a pin); an
+            // element anchor rides along in meta when present.
+            await addComment(
+              bodyText,
+              null,
+              { x: draftPin.x, y: draftPin.y },
+              draftPin.anchor ? { anchor: draftPin.anchor } : undefined
+            );
             onClearDraftPin?.();
           }}
           onCancel={() => onClearDraftPin?.()}
@@ -164,12 +189,15 @@ function PinDot({
 function DraftPin({
   x,
   y,
+  targetLabel,
   layerRef,
   onPost,
   onCancel,
 }: {
   x: number;
   y: number;
+  /** When set, the composer shows "Commenting on <label>" (element anchor). */
+  targetLabel?: string | null;
   layerRef: React.RefObject<HTMLDivElement | null>;
   onPost: (body: string) => Promise<void>;
   onCancel: () => void;
@@ -204,6 +232,7 @@ function DraftPin({
         <PinPopover
           x={x}
           y={y}
+          targetLabel={targetLabel}
           layerRef={layerRef}
           onPost={async (body) => {
             await onPost(body);
@@ -239,12 +268,14 @@ function DraftPin({
 function PinPopover({
   x,
   y,
+  targetLabel,
   layerRef,
   onPost,
   onCancel,
 }: {
   x: number;
   y: number;
+  targetLabel?: string | null;
   layerRef: React.RefObject<HTMLDivElement | null>;
   onPost: (body: string) => Promise<void>;
   onCancel: () => void;
@@ -354,11 +385,24 @@ function PinPopover({
       <div
         className={`w-[320px] max-w-[calc(100vw-3rem)] rounded-2xl p-4 [isolation:isolate] ${PANEL_SURFACE}`}
       >
+        {targetLabel && (
+          // Element-anchored draft: name what this comment is attached to,
+          // so it's unambiguous the note targets that part — not the whole
+          // slide. The ⌖ glyph matches the thread-card chip.
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-[#1E5BFF]">
+            <span aria-hidden>⌖</span>
+            <span className="truncate">Commenting on {targetLabel}</span>
+          </p>
+        )}
         <MentionableTextarea
           value={body}
           onChange={setBody}
           onSubmit={submit}
-          placeholder="Pin a comment here…  Type @ to mention."
+          placeholder={
+            targetLabel
+              ? `Comment on ${targetLabel}…  Type @ to mention.`
+              : "Pin a comment here…  Type @ to mention."
+          }
           rows={2}
           autoFocus
           className={`w-full resize-none rounded-xl px-3 py-2 text-[14px] leading-relaxed text-[#111] outline-none transition placeholder:text-[#888] ${INPUT_BASE}`}

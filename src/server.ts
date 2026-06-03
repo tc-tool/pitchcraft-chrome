@@ -61,6 +61,13 @@ export {
   slideDeleteDispatchDELETE,
 } from "./slideDispatch";
 
+// "You were heard" — DM the people who left feedback when the loop acts
+// on their behalf (instant apply / dispatch / shipped). The host's
+// apply-feedback route and the deep-code callback webhook both call it.
+// Server-only: it carries the Slack bot token.
+export { notifySlackHeard, heardRecipients } from "./notifySlack";
+export type { HeardKind } from "./notifySlack";
+
 // The store — uses ioredis. Importing this on the client side leads
 // to "Module not found: Can't resolve 'net'" because ioredis depends
 // on Node's TCP sockets. Server-only.

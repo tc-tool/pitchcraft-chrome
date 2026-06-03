@@ -8,6 +8,7 @@ import { useCurrentUser } from "./useCurrentUser";
 import { canCurate } from "./permissions";
 import { CHROME_DOCK_ITEM_PRIMARY } from "./surfaceTokens";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
+import type { PublishPreview } from "./types";
 
 interface PublishButtonProps {
   /**
@@ -33,6 +34,15 @@ interface PublishButtonProps {
    * control either way. Default false → the original framed capsule.
    */
   bare?: boolean;
+  /**
+   * Optional async loader for the publish preview — the honest diff of
+   * what this PUSH changes vs what's currently live. When provided, the
+   * confirm modal fetches it on open and lists the changes before the
+   * creative commits (the guardrail). Host-supplied because computing the
+   * diff needs the deck's content schema; chrome just renders the neutral
+   * result. Omitted → the modal shows the generic copy, as before.
+   */
+  loadPreview?: () => Promise<PublishPreview>;
 }
 
 /**
@@ -57,6 +67,7 @@ export function PublishButton({
   label = "PUSH",
   className = "",
   bare = false,
+  loadPreview,
 }: PublishButtonProps) {
   const { user } = useCurrentUser();
   const { lastPublished, isPublishing, error, publish } = usePublish();
@@ -125,6 +136,7 @@ export function PublishButton({
             lastPublished={lastPublished}
             error={error}
             isPublishing={isPublishing}
+            loadPreview={loadPreview}
           />
         )}
       </AnimatePresence>
@@ -178,6 +190,7 @@ interface PublishConfirmModalProps {
   lastPublished: { publishedAt: string; publishedBy: string } | null;
   error: string | null;
   isPublishing: boolean;
+  loadPreview?: () => Promise<PublishPreview>;
 }
 
 function PublishConfirmModal({
@@ -186,6 +199,7 @@ function PublishConfirmModal({
   lastPublished,
   error,
   isPublishing,
+  loadPreview,
 }: PublishConfirmModalProps) {
   // Portal-mount so the modal escapes the chrome-bar's transform
   // context. Without this, fixed positioning gets trapped inside the
@@ -194,6 +208,40 @@ function PublishConfirmModal({
   useEffect(() => {
     setPortalNode(document.body);
   }, []);
+
+  // The guardrail: fetch the honest diff of what this PUSH will change so
+  // the curator sees it before committing. Fire once on open. A failure
+  // is non-fatal — they can still publish (the publish route re-bakes
+  // from the same overlays, so the preview is advisory, not a gate).
+  const [preview, setPreview] = useState<PublishPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!loadPreview) return;
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    loadPreview()
+      .then((p) => {
+        if (!cancelled) setPreview(p);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled)
+          setPreviewError(
+            e instanceof Error ? e.message : "couldn't load the diff"
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadPreview]);
+
+  const noChanges =
+    !!preview && !preview.firstPublish && !preview.hasChanges;
+
   if (!portalNode) return null;
 
   return createPortal(
@@ -218,9 +266,64 @@ function PublishConfirmModal({
         </h2>
         <p className="mt-2 text-[12.5px] leading-relaxed text-black/65">
           Replaces what visitors see at <code>/</code> with the current
-          state of staging — every edit, deletion, addition, and reorder
-          included. Staging stays live and unchanged.
+          state of staging. Staging stays live and unchanged.
         </p>
+
+        {/* The guardrail: the honest diff vs what's currently live. Only
+            renders when the host supplied a loader; otherwise the modal is
+            the generic confirm it always was. */}
+        {loadPreview && (
+          <div className="mt-3.5 rounded-xl bg-black/[0.035] p-3 ring-1 ring-black/[0.05]">
+            {previewLoading && (
+              <p className="text-[12px] text-black/50">
+                Checking what will change…
+              </p>
+            )}
+            {previewError && !previewLoading && (
+              <p className="text-[12px] leading-relaxed text-amber-700">
+                Couldn’t compute the diff ({previewError}). You can still
+                publish — the result is the current staging state.
+              </p>
+            )}
+            {preview && !previewLoading && (
+              <>
+                {preview.firstPublish ? (
+                  <p className="text-[12.5px] leading-relaxed text-black/75">
+                    {preview.lines[0]}
+                  </p>
+                ) : preview.hasChanges ? (
+                  <>
+                    <p className="text-[10.5px] font-medium uppercase tracking-wide text-black/45">
+                      This push will change
+                    </p>
+                    <ul className="mt-2 flex flex-col gap-1.5">
+                      {preview.lines.map((line, i) => (
+                        <li
+                          key={i}
+                          className="flex items-center gap-2 text-[12.5px] text-black/80"
+                        >
+                          <span
+                            aria-hidden
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1E5BFF]"
+                          />
+                          {line}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="flex items-center gap-2 text-[12.5px] text-black/60">
+                    <span
+                      aria-hidden
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-black/25"
+                    />
+                    {preview.lines[0]}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {lastPublished && (
           <p className="mt-3 text-[11px] uppercase text-black/45">
@@ -250,7 +353,11 @@ function PublishConfirmModal({
             disabled={isPublishing}
             className="rounded-full bg-[#111] px-4 py-1.5 text-[12px] font-medium text-white hover:bg-black disabled:opacity-60 disabled:cursor-wait"
           >
-            {isPublishing ? "Publishing…" : "Publish"}
+            {isPublishing
+              ? "Publishing…"
+              : noChanges
+                ? "Publish anyway"
+                : "Publish"}
           </button>
         </div>
       </motion.div>

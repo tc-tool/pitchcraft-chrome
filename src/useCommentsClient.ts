@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useDeckId } from "./CommentsProvider";
+import { useDeckId, useCommentSurface } from "./CommentsProvider";
 import { notifyCommentsChanged, onCommentsChanged } from "./events";
-import type { Comment, CommentStatus, Thread } from "./types";
+import type { Comment, CommentAnchor, CommentStatus, Thread } from "./types";
 
 /**
  * Client-side hook for reading + mutating comments for one slide.
@@ -17,6 +17,7 @@ import type { Comment, CommentStatus, Thread } from "./types";
  */
 export function useCommentsForSlide(slideId: string) {
   const deckId = useDeckId();
+  const surface = useCommentSurface();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,11 +64,19 @@ export function useCommentsForSlide(slideId: string) {
       body: string,
       parentId?: string | null,
       pin?: { x: number; y: number } | null,
-      // Anchor metadata supplied by the host: a hash + version of the
-      // slide's content at the moment of commenting, so the deck can later
-      // badge "changed since this note." Only stamped on top-level
-      // comments (replies inherit the thread's anchor).
-      meta?: { contentHash?: string; version?: string }
+      // Anchor metadata supplied by the host:
+      //   - contentHash/version: a snapshot of the slide's content at
+      //     comment time, so the deck can later badge "changed since this
+      //     note."
+      //   - anchor: a richer attachment (element / region) from the
+      //     inspect-element gesture. Slide-level comments omit it.
+      // All only stamped on top-level comments (replies inherit the
+      // thread's anchor).
+      meta?: {
+        contentHash?: string;
+        version?: string;
+        anchor?: CommentAnchor;
+      }
     ) => {
       const trimmed = body.trim();
       if (!trimmed) return;
@@ -81,6 +90,10 @@ export function useCommentsForSlide(slideId: string) {
           slideId,
           body: trimmed,
           parentId: parentId ?? null,
+          // Which surface this was authored on — the server stamps it as
+          // the comment's `origin` (context only; audience is still
+          // derived from the verified role, never from this).
+          surface,
           ...(pin ? { pin } : {}),
           ...(isTopLevel && meta?.contentHash
             ? { anchorContentHash: meta.contentHash }
@@ -88,6 +101,7 @@ export function useCommentsForSlide(slideId: string) {
           ...(isTopLevel && meta?.version
             ? { anchorVersion: meta.version }
             : {}),
+          ...(isTopLevel && meta?.anchor ? { anchor: meta.anchor } : {}),
         }),
       });
       if (!res.ok) {
@@ -99,7 +113,7 @@ export function useCommentsForSlide(slideId: string) {
       notifyCommentsChanged(slideId);
       return comment;
     },
-    [deckId, slideId]
+    [deckId, slideId, surface]
   );
 
   const editComment = useCallback(

@@ -218,7 +218,12 @@ The PUSH button is the gate between the two. Staging churns (source edits *and* 
 - ✅ Fixed "Tool" upfront — standard agency-intro sections (incl. WebGL scenes) that open every deck; backdrop + slides retint from one accent token
 - ✅ Deck-accent control — single creative-only swatch (the §2.1 carve-out) sets `meta.accent`/`--deck-accent` via a Redis overlay; instant in staging, baked on PUSH
 - ✅ Case-study picker (the §2.2 carve-out) — creative+producer search Tool's experiential work archive (WPGraphQL) and attach projects as case-study slides before Thank-you; Redis overlay, instant in staging, baked on PUSH
-- ✅ Comment review-layer hardening — internal-vs-client audience gate (clients never see internal threads), richer anchors (element/region), "slide changed since this note" badge, orphaned-comment recovery in the outline, and a "Sent to Claude · #N" traceability chip on comments
+- ✅ Comment review-layer hardening — internal-vs-client audience gate (clients never see internal threads), richer anchors (element/region), "slide changed since this note" badge, orphaned-comment recovery in the outline
+- ✅ Traceability chips on a comment — "Copy applied" (instant), "Sent to Claude · #N" (in flight), "Shipped to the deck" (landed). Built from `resolution.appliedAt` / `issueNumber` / `mergedAt`, which are stamped (and shallow-merged) as the loop advances
+- ✅ "You were heard" Slack DMs — when feedback is applied (instant), dispatched to Claude, or its deep-code change lands on main, the people who left it get a direct ack. The merge rung is closed by the claude-triage workflow calling back to `/api/github/heard` (opt-in via `PITCHCRAFT_HEARD_SECRET` + repo var `PITCHCRAFT_DECK_URL`)
+- ✅ PUSH publish-preview guardrail — the confirm modal shows the honest diff vs what's currently live ("2 slides edited, 1 added, reordered…") before publishing, computed from the same bytes PUSH writes (`buildEffectiveDeck` shared by preview + publish). "Publish anyway" when nothing changed
+- ✅ Client review surface on the production link — with `NEXT_PUBLIC_ENABLE_CLIENT_COMMENTS=true`, clients comment on `/`; a signed-in viewer with no role is auto-assigned `client` (the team RolePicker is a staging concept), guarded so a deck owner is never mislabeled. Comments carry an `origin` (production/staging) stamp
+- ✅ Inspect-element commenting — Alt-hover outlines any tagged `[data-anchor]` element (headline, a bullet, the proof stat…), Alt-click attaches a comment to THAT part (`anchor: element`), riding the spatial-pin pipeline. Untagged slides fall back to shift-click point pins
 - ✅ Slide navigator (press `O`: zoom-out grid, type-to-jump) + per-slide poster thumbnails (`npm run deck:posters`)
 - ✅ Factory script for one-shot deck spinup (~30 sec end-to-end excluding Google OAuth)
 - ✅ Custom subdomain per deck via Cloudflare CNAME + Railway service domain
@@ -226,7 +231,9 @@ The PUSH button is the gate between the two. Staging churns (source edits *and* 
 
 ### 5.2 In flight or rough edges
 
-- 🟡 Instant content edits (the §2.1 carve-out) — copy feedback → Claude API → Redis content overlay, applied at render time. The fast path that replaces the GitHub round-trip for one-line copy changes; in flight.
+- ✅ Instant content edits (the §2.1 carve-out) — copy feedback → Claude API → Redis content overlay, applied at render time. The fast path that replaces the GitHub round-trip for one-line copy changes; live in staging, baked on PUSH.
+- 🟡 Element-anchor highlight-on-thread-hover — hovering an element-anchored thread highlights its pin (at the element's center) but not yet the element outline itself. Minor polish.
+- 🟡 Inspect-element tagging covers the standard content slides (Cover, Statement, Bullets, Proof, Quote, Section Divider, Case Study); the bespoke "Tool" upfront slides aren't tagged yet (they fall back to point pins). Tag incrementally with `data-anchor`.
 - 🟡 Per-deck password gate (`/unlock`) — half-built, `NavRingTorus` is a stub
 - 🟡 The triage queue UI may collapse into a per-comment "Implement" button (open design question — see §9)
 - 🟡 Some Boilerplate slide types are minimal (Cover, Statement, Bullets, Proof, Case Study, Section Divider, Placeholder, Quote, Video) — slide layouts are intentionally lean
@@ -351,7 +358,10 @@ These need decisions before they balloon.
 
 6. **Multi-creative decks.** Currently one creative per deck (the owner). If two creatives collaborate, who controls PUSH? Defer until it comes up.
 
-7. **Boundary cases between Deck Skin and Review Interface.** Mostly clear (slides = Skin; comment panel = Review Interface), but a few edges need calling out as they come up. Example: the top chrome bar that shows "PITCHCRAFT / STAGING / 01 / 08" — currently the bar layout lives in the host (Deck Skin territory) but the typography style was conformed to Review Interface rules. That's probably fine, but worth being explicit when it next gets touched: deck identity (the bar's *visual identity*) is Skin; standardized info elements inside it (slide counter rhythm, mode badge) are Review Interface. **Default position:** when in doubt, treat it as Review Interface unless a specific pitch needs it to express deck identity, and document the choice in the deck repo.
+7. **Client authentication on the production review surface.** Clients comment on `/` via the same Google sign-in the team uses; a signed-in viewer with no role is auto-assigned `client`. This reuses the verified-identity + audience model with zero new infra, but assumes the client has (and will use) a Google account.
+   - **Default position (decided 2026-06):** Google sign-in + auto-`client`. Revisit only if a real client balks — the fallback would be a lightweight magic-link/email provider (next-auth email) or a name-only link-token identity, both of which would relax the "audience derives from verified role" guarantee and need their own design pass. The client surface, audience gating, and `origin` stamping are auth-method-agnostic, so swapping the sign-in layer later doesn't redo Phase 3.
+
+8. **Boundary cases between Deck Skin and Review Interface.** Mostly clear (slides = Skin; comment panel = Review Interface), but a few edges need calling out as they come up. Example: the top chrome bar that shows "PITCHCRAFT / STAGING / 01 / 08" — currently the bar layout lives in the host (Deck Skin territory) but the typography style was conformed to Review Interface rules. That's probably fine, but worth being explicit when it next gets touched: deck identity (the bar's *visual identity*) is Skin; standardized info elements inside it (slide counter rhythm, mode badge) are Review Interface. **Default position:** when in doubt, treat it as Review Interface unless a specific pitch needs it to express deck identity, and document the choice in the deck repo.
 
 ---
 
