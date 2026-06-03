@@ -97,6 +97,8 @@ Anything in this list should be **actively refused** unless we formally amend th
 1. **Not a visual editor.** No drag-to-resize, no inline rich-text WYSIWYG, no font choosers, no free-form style editing. Visuals live in code; the chrome is for feedback only.
 
    **One deliberate exception (amended 2026-06): the deck-accent control.** A *single, creative-only* swatch sets one value — the deck's accent color (`meta.accent` → the `--deck-accent` CSS token) — through a Redis overlay, exactly like the reorder/delete overlays (instant in staging, baked into the production snapshot on PUSH). It is allowed because it is **one token, creative-gated, and the accent is a Deck-Skin concept the creative already owns** — and because the alternative (hand-editing source for every retint) fights the "immediate and intuitive" principle in §1. This is **not** a foothold for a general visual editor: no other visual property earns a GUI without a further amendment to this clause. Producers and clients never see the control.
+
+   **Bounded exception (amended 2026-06): instant content edits.** Copy feedback is applied by *Claude*, not by hand: the deck's server calls the Claude API and writes the rewritten field(s) to a Redis **content overlay** — instant in staging, baked on PUSH — the same overlay model as accent and case-study. This stays on the right side of "not a visual editor" (and §2.2's "not a CMS") because there is **no WYSIWYG and no typing into the slide**: the creative leaves feedback in words, the AI rewrites the field, and `deck.content.ts` is reconciled later through deliberate authoring. **AI + creative remain the only writers to content**; producers/clients never author directly. It exists because a full GitHub-Action → rebuild round-trip for a one-line copy change fights the "immediate and intuitive" principle in §1 — minutes where it should be seconds.
 2. **Not a CMS.** Producers/clients can comment but never directly write to `deck.content.ts`. The only path to source is the creative + Claude.
 
    **Bounded exception (amended 2026-06): the case-study picker.** Creative+producer may *select* (not author) past projects from Tool's own work archive (`toolofna.com/experience/work/`, read via its public WPGraphQL) and attach them as case-study slides at the end of the deck. This stays on the right side of "not a CMS" because: it's **selection from a fixed, external archive** (no free-form content authoring), it writes a **Redis overlay** (not `deck.content.ts`) that's baked into the snapshot on PUSH — the same model as the reorder/add-slide overlays — so **source is still only ever touched by creative + Claude**. It is not a license to hand-author arbitrary slide content through a GUI.
@@ -167,9 +169,9 @@ If `getStore` or any ioredis-dependent symbol ever leaks into the client barrel,
 │              ↓                                                  │
 │   anthropics/claude-code-action runs on GitHub                  │
 │              ↓                                                  │
-│   Claude opens a PR with edits to deck.content.ts               │
+│   Claude commits the edit straight to main (no PR)               │
 │              ↓                                                  │
-│   Creative reviews diff, merges PR                              │
+│   (no PR, no merge — it just lands on main)                              │
 │              ↓                                                  │
 │   Railway auto-deploys → /staging reflects change in ~60s       │
 │              ↓                                                  │
@@ -180,7 +182,13 @@ If `getStore` or any ioredis-dependent symbol ever leaks into the client barrel,
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-The loop above is the path for **content** changes — copy, design, anything that's genuinely code. **Structural** changes (add / delete / reorder a slide) skip Claude entirely: they're instant Redis overlays applied on top of source. They show in staging immediately and are baked into the production snapshot when the creative hits PUSH.
+The diagram shows the **deep/code path** (new slide types, layout, components). Two faster tiers sit in front of it, and **none of the three asks anyone to merge anything**:
+
+- **Structural** (add / delete / reorder a slide, set accent, attach a case study) → an instant Redis overlay. No Claude, no git.
+- **Copy** (rewrite a headline / body / bullet from feedback) → the deck's server calls the Claude API and writes the rewritten field(s) to a **content overlay** — visible on `/staging` in seconds. No GitHub Action, no rebuild, no PR.
+- **Deep / code** → Send to Claude → GitHub issue → the Claude Code action commits **directly to `main`** (no PR, no merge) → Railway redeploys.
+
+All three surface on `/staging` on their own. **PUSH is the only gate** — clients see nothing until the creative pushes, which snapshots the effective staging state (source + every overlay). There is no second review/merge gate anywhere, by design (see §1: *review behavior is instant; only deliberate authoring touches git, and even then never a merge step*).
 
 Two views, two sources of truth, one gate:
 
@@ -204,18 +212,21 @@ The PUSH button is the gate between the two. Staging churns (source edits *and* 
 - ✅ Role-once flow (creative / producer / client picked once per deck)
 - ✅ Per-deck owner allowlist (`NEXT_PUBLIC_DECK_OWNER_EMAILS`) for high-trust actions
 - ✅ Triage queue (creative checkboxes per comment → sticky "N queued" bar)
-- ✅ Send to Claude → GitHub issue → action → PR loop
+- ✅ Send to Claude → GitHub issue → action commits **directly to main** (no PR/merge); copy edits take the faster overlay path (§2.1 instant content edits)
 - ✅ Copy-to-clipboard fallback if creative wants to paste into a manual Claude Code session
 - ✅ PUSH (publish-to-production) snapshot gate
 - ✅ Fixed "Tool" upfront — standard agency-intro sections (incl. WebGL scenes) that open every deck; backdrop + slides retint from one accent token
 - ✅ Deck-accent control — single creative-only swatch (the §2.1 carve-out) sets `meta.accent`/`--deck-accent` via a Redis overlay; instant in staging, baked on PUSH
 - ✅ Case-study picker (the §2.2 carve-out) — creative+producer search Tool's experiential work archive (WPGraphQL) and attach projects as case-study slides before Thank-you; Redis overlay, instant in staging, baked on PUSH
+- ✅ Comment review-layer hardening — internal-vs-client audience gate (clients never see internal threads), richer anchors (element/region), "slide changed since this note" badge, orphaned-comment recovery in the outline, and a "Sent to Claude · #N" traceability chip on comments
+- ✅ Slide navigator (press `O`: zoom-out grid, type-to-jump) + per-slide poster thumbnails (`npm run deck:posters`)
 - ✅ Factory script for one-shot deck spinup (~30 sec end-to-end excluding Google OAuth)
 - ✅ Custom subdomain per deck via Cloudflare CNAME + Railway service domain
 - ✅ Slack notifications, payment-free + zero per-deck setup
 
 ### 5.2 In flight or rough edges
 
+- 🟡 Instant content edits (the §2.1 carve-out) — copy feedback → Claude API → Redis content overlay, applied at render time. The fast path that replaces the GitHub round-trip for one-line copy changes; in flight.
 - 🟡 Per-deck password gate (`/unlock`) — half-built, `NavRingTorus` is a stub
 - 🟡 The triage queue UI may collapse into a per-comment "Implement" button (open design question — see §9)
 - 🟡 Some Boilerplate slide types are minimal (Cover, Statement, Bullets, Proof, Case Study, Section Divider, Placeholder, Quote, Video) — slide layouts are intentionally lean
@@ -228,6 +239,7 @@ The PUSH button is the gate between the two. Staging churns (source edits *and* 
 - ❌ Draft / Review / Approved slide-status pill — removed. Visibility is now driven by the PUSH gate and the `visibility` field, not per-slide status.
 - ❌ Per-slide status overlay storage — gone from chrome + host.
 - ❌ Top-bar PUSH button — moved into the floating cluster with Comments + Export.
+- ❌ **PR / merge review step for content** — removed (amended 2026-06). Send-to-Claude commits directly to main; copy edits write an overlay. PUSH is the only gate to clients, so a PR/merge was a redundant second gate and pure friction. Don't re-add a content merge step.
 - ❌ **Slide add/delete via Claude PR** — removed. Adding or deleting a slide used to dispatch a GitHub issue → Claude PR → merge → redeploy, with a "pending PR" strip in the outline. That dragged git into a producer's face for a one-click structural op. Replaced by instant Redis overlays (see §4, §6.3). The PR/merge step now exists *only* for content/design authoring. Do not re-add a "source convergence" PR for structural ops.
 - ❌ Wide letter-spaced uppercase labels in chrome (`tracking-[0.28em]` etc.) — stripped from all chrome UI. Slide typography (cover eyebrows, statement labels) keeps its tracking because that's deck design, not chrome.
 

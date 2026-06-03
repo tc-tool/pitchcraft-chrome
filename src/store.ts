@@ -143,6 +143,18 @@ export interface CommentsStore {
   getCaseStudies(deckId: string): Promise<unknown[]>;
   setCaseStudies(deckId: string, list: unknown[]): Promise<void>;
   /**
+   * "Apply this copy edit" overlay — instant content edits (the §2.1
+   * carve-out). A map of slideId → opaque field patch (the host owns the
+   * field schema; chrome just persists the JSON). The host merges the
+   * patch onto the matching slide at render time and bakes it on PUSH —
+   * same model as case-studies. `setContentOverride` merges into the
+   * slide's existing patch. Returns `{}` when unset.
+   */
+  getContentOverrides(deckId: string): Promise<Record<string, unknown>>;
+  setContentOverride(deckId: string, slideId: string, patch: unknown): Promise<void>;
+  clearContentOverride(deckId: string, slideId: string): Promise<void>;
+  clearContentOverrides(deckId: string): Promise<void>;
+  /**
    * Every comment currently in the implementation queue, sorted oldest
    * first. The compile-prompt button reads this and concatenates the
    * bodies for the Claude handoff.
@@ -247,6 +259,12 @@ const k = {
    * materializes each into a closing-run slide. Same model as added.
    */
   caseStudies: (deckId: string) => `comments:${deckId}:case-studies`,
+  /**
+   * STRING (JSON) — map of slideId → opaque field patch from an instant
+   * content edit (§2.1). Host materializes onto slides; baked on PUSH.
+   */
+  contentOverrides: (deckId: string) =>
+    `comments:${deckId}:content-overrides`,
 };
 
 // ─── JSON helpers ─────────────────────────────────────────────────────
@@ -565,6 +583,39 @@ class RedisCommentsStore implements CommentsStore {
   async setCaseStudies(deckId: string, list: unknown[]): Promise<void> {
     await this.redis.set(k.caseStudies(deckId), JSON.stringify(list));
   }
+
+  async getContentOverrides(deckId: string): Promise<Record<string, unknown>> {
+    const parsed = parseJson<Record<string, unknown>>(
+      await this.redis.get(k.contentOverrides(deckId))
+    );
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  }
+
+  async setContentOverride(
+    deckId: string,
+    slideId: string,
+    patch: unknown
+  ): Promise<void> {
+    const current = await this.getContentOverrides(deckId);
+    const prev =
+      current[slideId] && typeof current[slideId] === "object"
+        ? (current[slideId] as Record<string, unknown>)
+        : {};
+    current[slideId] = { ...prev, ...(patch as Record<string, unknown>) };
+    await this.redis.set(k.contentOverrides(deckId), JSON.stringify(current));
+  }
+
+  async clearContentOverride(deckId: string, slideId: string): Promise<void> {
+    const current = await this.getContentOverrides(deckId);
+    delete current[slideId];
+    await this.redis.set(k.contentOverrides(deckId), JSON.stringify(current));
+  }
+
+  async clearContentOverrides(deckId: string): Promise<void> {
+    await this.redis.del(k.contentOverrides(deckId));
+  }
 }
 
 // ─── Memory implementation ─────────────────────────────────────────────
@@ -810,6 +861,35 @@ class MemoryCommentsStore implements CommentsStore {
 
   async setCaseStudies(deckId: string, list: unknown[]): Promise<void> {
     this.caseStudyOverlays.set(deckId, [...list]);
+  }
+
+  private contentOverrideOverlays = new Map<string, Record<string, unknown>>();
+
+  async getContentOverrides(deckId: string): Promise<Record<string, unknown>> {
+    return { ...(this.contentOverrideOverlays.get(deckId) ?? {}) };
+  }
+
+  async setContentOverride(
+    deckId: string,
+    slideId: string,
+    patch: unknown
+  ): Promise<void> {
+    const current = this.contentOverrideOverlays.get(deckId) ?? {};
+    const prev =
+      current[slideId] && typeof current[slideId] === "object"
+        ? (current[slideId] as Record<string, unknown>)
+        : {};
+    current[slideId] = { ...prev, ...(patch as Record<string, unknown>) };
+    this.contentOverrideOverlays.set(deckId, current);
+  }
+
+  async clearContentOverride(deckId: string, slideId: string): Promise<void> {
+    const current = this.contentOverrideOverlays.get(deckId);
+    if (current) delete current[slideId];
+  }
+
+  async clearContentOverrides(deckId: string): Promise<void> {
+    this.contentOverrideOverlays.delete(deckId);
   }
 }
 
