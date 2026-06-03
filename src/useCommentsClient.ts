@@ -62,11 +62,17 @@ export function useCommentsForSlide(slideId: string) {
     async (
       body: string,
       parentId?: string | null,
-      pin?: { x: number; y: number } | null
+      pin?: { x: number; y: number } | null,
+      // Anchor metadata supplied by the host: a hash + version of the
+      // slide's content at the moment of commenting, so the deck can later
+      // badge "changed since this note." Only stamped on top-level
+      // comments (replies inherit the thread's anchor).
+      meta?: { contentHash?: string; version?: string }
     ) => {
       const trimmed = body.trim();
       if (!trimmed) return;
 
+      const isTopLevel = !parentId;
       const res = await fetch(`/api/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -76,6 +82,12 @@ export function useCommentsForSlide(slideId: string) {
           body: trimmed,
           parentId: parentId ?? null,
           ...(pin ? { pin } : {}),
+          ...(isTopLevel && meta?.contentHash
+            ? { anchorContentHash: meta.contentHash }
+            : {}),
+          ...(isTopLevel && meta?.version
+            ? { anchorVersion: meta.version }
+            : {}),
         }),
       });
       if (!res.ok) {

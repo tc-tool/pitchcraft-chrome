@@ -77,6 +77,16 @@ interface CommentPanelProps {
     slides: readonly OutlineSlide[];
     onGoToSlide: (index: number) => void;
   };
+  /**
+   * A stable hash of the ACTIVE slide's content (host-computed). New
+   * comments are stamped with it; a thread whose stamp differs from this
+   * gets a "changed since this note" badge — the signal that the slide
+   * moved under a comment (an edit / PUSH / Claude rewrite). Optional;
+   * absent → no stamping, no badge.
+   */
+  slideContentHash?: string;
+  /** Deck content version stamped alongside the hash (e.g. meta.lastUpdated). */
+  deckVersion?: string;
   /** @deprecated kept for back-compat; ignored now that role is per-user. */
   defaultRole?: CommentRole;
 }
@@ -146,6 +156,8 @@ export function CommentPanel({
   clearFocusThreadId,
   onHoverThread,
   outline,
+  slideContentHash,
+  deckVersion,
 }: CommentPanelProps) {
   // Tabbed view: comments (default) or outline (deck-wide slide list).
   // Outline tab only shows when the host opted in by passing `outline`.
@@ -260,7 +272,10 @@ export function CommentPanel({
     // having lost what they typed.
     setBody("");
     try {
-      await addComment(trimmed);
+      await addComment(trimmed, null, null, {
+        contentHash: slideContentHash,
+        version: deckVersion,
+      });
       // sessionStorage is cleared by the body-effect when body becomes "".
     } catch (e: unknown) {
       setSubmitError(e instanceof Error ? e.message : "Failed to post.");
@@ -485,6 +500,11 @@ export function CommentPanel({
                         canAct={isAuthed}
                         currentEmail={currentEmail}
                         usersByEmail={usersByEmail}
+                        changedSince={
+                          !!thread.parent.anchorContentHash &&
+                          !!slideContentHash &&
+                          thread.parent.anchorContentHash !== slideContentHash
+                        }
                         onReply={async (replyBody) => {
                           await addComment(replyBody, thread.parent.id);
                         }}
@@ -781,6 +801,7 @@ function ThreadCard({
   canAct,
   currentEmail,
   usersByEmail,
+  changedSince,
   onReply,
   onEdit,
   onDelete,
@@ -793,6 +814,8 @@ function ThreadCard({
   canAct: boolean;
   currentEmail: string | null;
   usersByEmail: Map<string, UserRecord>;
+  /** Slide content changed since this note was written. */
+  changedSince?: boolean;
   onReply: (body: string) => Promise<void>;
   onEdit: (commentId: string, body: string) => Promise<void>;
   onDelete: (commentId: string) => Promise<void>;
@@ -852,6 +875,12 @@ function ThreadCard({
       onMouseLeave={isPinned ? () => onHover?.(null) : undefined}
       className="flex flex-col gap-2"
     >
+      {changedSince && !isResolved && (
+        <div className="flex items-center gap-1.5 self-start rounded-lg bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200/70">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+          Slide changed since this note
+        </div>
+      )}
       <CommentBlock
         comment={parent}
         usersByEmail={usersByEmail}
