@@ -41,10 +41,19 @@ export type CommentAnchor =
 /**
  * Link back to the change that addressed a comment. Populated by the
  * traceability loop (queue dispatch + PR-merge webhook), not by users.
+ * Built up in stages: dispatch stamps the issue; the webhook later adds
+ * the PR + merge.
  */
 export interface CommentResolution {
+  /** The triage issue this comment was dispatched to ("Send to Claude"). */
+  issueNumber?: number;
+  issueUrl?: string;
+  /** ISO 8601 — when it was sent to Claude. */
+  dispatchedAt?: string;
+  /** The PR that implemented it (set by the merge webhook — Phase 2b). */
   prNumber?: number;
   prUrl?: string;
+  /** ISO 8601 — when the PR merged. */
   mergedAt?: string;
 }
 

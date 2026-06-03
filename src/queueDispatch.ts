@@ -89,6 +89,26 @@ export async function queueDispatchPOST(req: NextRequest) {
       );
     }
 
+    // Stamp every queued comment with the issue link so each thread shows
+    // "Sent to Claude · #N" — the loop is visible on the comment instead
+    // of a guess. Best-effort: a stamping hiccup must not fail a dispatch
+    // whose issue was already created.
+    try {
+      const queued = await getStore().listQueued(deckId);
+      const dispatchedAt = new Date().toISOString();
+      await Promise.all(
+        queued.map((c) =>
+          getStore().setResolution(deckId, c.id, {
+            issueNumber: result.issueNumber,
+            issueUrl: result.issueUrl,
+            dispatchedAt,
+          })
+        )
+      );
+    } catch {
+      /* stamping is best-effort */
+    }
+
     return NextResponse.json({
       ok: true,
       issueNumber: result.issueNumber,

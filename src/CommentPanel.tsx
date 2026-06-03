@@ -962,6 +962,33 @@ function ThreadCard({
           Slide changed since this note
         </div>
       )}
+      {parent.resolution?.issueUrl && (
+        <a
+          href={parent.resolution.prUrl ?? parent.resolution.issueUrl}
+          target="_blank"
+          rel="noreferrer"
+          // Traceability: links a comment to the work it kicked off. Shows
+          // the merged PR once known, else the triage issue it was sent to.
+          className="flex items-center gap-1.5 self-start rounded-lg bg-[rgba(30,91,255,0.08)] px-2.5 py-1 text-[11px] font-medium text-[#1E5BFF] ring-1 ring-[rgba(30,91,255,0.18)] transition-colors hover:bg-[rgba(30,91,255,0.14)]"
+        >
+          <svg
+            width={11}
+            height={11}
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M5 11L11 5M6 5h5v5" />
+          </svg>
+          {parent.resolution.prNumber
+            ? `Applied · PR #${parent.resolution.prNumber}`
+            : `Sent to Claude · #${parent.resolution.issueNumber}`}
+        </a>
+      )}
       <CommentBlock
         comment={parent}
         usersByEmail={usersByEmail}
