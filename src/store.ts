@@ -1,5 +1,12 @@
 import { Redis } from "ioredis";
-import type { Comment, CommentRole, CommentStatus, UserRecord } from "./types";
+import type {
+  Comment,
+  CommentAudience,
+  CommentResolution,
+  CommentRole,
+  CommentStatus,
+  UserRecord,
+} from "./types";
 
 /**
  * Comment storage abstraction.
@@ -23,6 +30,17 @@ export interface CommentsStore {
   get(deckId: string, commentId: string): Promise<Comment | null>;
   create(comment: Comment): Promise<Comment>;
   setStatus(deckId: string, commentId: string, status: CommentStatus, resolverEmail?: string): Promise<Comment | null>;
+  /**
+   * Change who may see a comment (internal ↔ client). Creative-only at the
+   * route layer; the store just persists. Used to surface an internal note
+   * to the client, or retract one.
+   */
+  setVisibility(deckId: string, commentId: string, audience: CommentAudience): Promise<Comment | null>;
+  /**
+   * Stamp the change that addressed a comment (PR ref). Written by the
+   * traceability loop, not by users.
+   */
+  setResolution(deckId: string, commentId: string, resolution: CommentResolution): Promise<Comment | null>;
   /** Replace a comment's body (and its derived mentions). Stamps editedAt. */
   updateBody(
     deckId: string,
@@ -289,6 +307,34 @@ class RedisCommentsStore implements CommentsStore {
       resolvedAt: status === "resolved" ? new Date().toISOString() : undefined,
       resolvedBy: status === "resolved" ? resolverEmail : undefined,
     };
+    await this.redis.set(k.item(deckId, commentId), JSON.stringify(updated));
+    return updated;
+  }
+
+  async setVisibility(
+    deckId: string,
+    commentId: string,
+    audience: CommentAudience
+  ): Promise<Comment | null> {
+    const existing = parseJson<Comment>(
+      await this.redis.get(k.item(deckId, commentId))
+    );
+    if (!existing) return null;
+    const updated: Comment = { ...existing, audience };
+    await this.redis.set(k.item(deckId, commentId), JSON.stringify(updated));
+    return updated;
+  }
+
+  async setResolution(
+    deckId: string,
+    commentId: string,
+    resolution: CommentResolution
+  ): Promise<Comment | null> {
+    const existing = parseJson<Comment>(
+      await this.redis.get(k.item(deckId, commentId))
+    );
+    if (!existing) return null;
+    const updated: Comment = { ...existing, resolution };
     await this.redis.set(k.item(deckId, commentId), JSON.stringify(updated));
     return updated;
   }
@@ -563,6 +609,30 @@ class MemoryCommentsStore implements CommentsStore {
       resolvedAt: status === "resolved" ? new Date().toISOString() : undefined,
       resolvedBy: status === "resolved" ? resolverEmail : undefined,
     };
+    this.comments.set(this.key(deckId, commentId), updated);
+    return updated;
+  }
+
+  async setVisibility(
+    deckId: string,
+    commentId: string,
+    audience: CommentAudience
+  ): Promise<Comment | null> {
+    const existing = this.comments.get(this.key(deckId, commentId));
+    if (!existing) return null;
+    const updated: Comment = { ...existing, audience };
+    this.comments.set(this.key(deckId, commentId), updated);
+    return updated;
+  }
+
+  async setResolution(
+    deckId: string,
+    commentId: string,
+    resolution: CommentResolution
+  ): Promise<Comment | null> {
+    const existing = this.comments.get(this.key(deckId, commentId));
+    if (!existing) return null;
+    const updated: Comment = { ...existing, resolution };
     this.comments.set(this.key(deckId, commentId), updated);
     return updated;
   }

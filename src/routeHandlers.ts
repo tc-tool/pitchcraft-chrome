@@ -3,7 +3,7 @@ import { auth } from "./authConfig";
 import { notifySlackMention } from "./notifySlack";
 import { canCurate, canReorderSlides } from "./permissions";
 import { getStore } from "./store";
-import type { Comment, CommentRole, CommentStatus } from "./types";
+import type { Comment, CommentAnchor, CommentRole, CommentStatus } from "./types";
 
 /**
  * Pull `<@email>` tokens out of a comment body, dedupe, lowercase.
@@ -18,6 +18,50 @@ function extractMentions(body: string): string[] {
     found.add(m[1].toLowerCase());
   }
   return Array.from(found);
+}
+
+/**
+ * Validate a richer comment anchor from the client. Returns a clean
+ * CommentAnchor or null (→ the comment falls back to slide-level / pin).
+ * Chrome stays content-agnostic: it only checks shape + numeric ranges,
+ * never what `part` means or whether `quote` matches anything.
+ */
+function validateAnchor(raw: unknown): CommentAnchor | null {
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw as {
+    scope?: string;
+    part?: unknown;
+    rect?: unknown;
+    quote?: unknown;
+  };
+  const quote =
+    typeof a.quote === "string" && a.quote.trim()
+      ? a.quote.trim().slice(0, 280)
+      : undefined;
+
+  if (a.scope === "slide") return { scope: "slide" };
+
+  if (a.scope === "element" && typeof a.part === "string" && a.part.trim()) {
+    return {
+      scope: "element",
+      part: a.part.trim().slice(0, 120),
+      ...(quote ? { quote } : {}),
+    };
+  }
+
+  if (a.scope === "region" && a.rect && typeof a.rect === "object") {
+    const r = a.rect as Record<string, unknown>;
+    const x = Number(r.x);
+    const y = Number(r.y);
+    const w = Number(r.w);
+    const h = Number(r.h);
+    const inRange = (n: number) => Number.isFinite(n) && n >= 0 && n <= 1;
+    if ([x, y, w, h].every(inRange)) {
+      return { scope: "region", rect: { x, y, w, h }, ...(quote ? { quote } : {}) };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -46,8 +90,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "deckId required" }, { status: 400 });
   }
 
+  // Audience gate (no-leak): only the team (creative / producer) sees
+  // internal comments. Clients and anonymous viewers get client-visible
+  // comments only — and a legacy comment with no `audience` counts as
+  // internal, so old internal notes never surface on the client link.
+  const session = await auth();
+  let isTeam = false;
+  if (session?.user?.email) {
+    const userRecord = await getStore().getUser(deckId, session.user.email);
+    isTeam = canReorderSlides(session.user.email, userRecord?.role);
+  }
+
   const comments = await getStore().list(deckId, slideId);
-  return NextResponse.json({ comments });
+  const visible = isTeam
+    ? comments
+    : comments.filter((c) => (c.audience ?? "internal") === "client");
+  return NextResponse.json({ comments: visible });
 }
 
 export async function POST(req: NextRequest) {
@@ -67,12 +125,20 @@ export async function POST(req: NextRequest) {
     body: commentBody,
     parentId,
     pin,
+    anchor: anchorRaw,
+    surface,
+    anchorContentHash,
+    anchorVersion,
   } = body as {
     deckId?: string;
     slideId?: string;
     body?: string;
     parentId?: string | null;
     pin?: { x?: number; y?: number } | null;
+    anchor?: unknown;
+    surface?: string;
+    anchorContentHash?: string;
+    anchorVersion?: string;
   };
 
   if (!deckId || !slideId || !commentBody?.trim()) {
@@ -95,6 +161,10 @@ export async function POST(req: NextRequest) {
     validatedPin = { x, y };
   }
 
+  // Richer anchor (element / region / slide). Like pins, only top-level
+  // comments carry one — replies inherit the thread's.
+  const validatedAnchor = parentId ? null : validateAnchor(anchorRaw);
+
   // Look up the user's stored role. If they haven't picked yet, reject —
   // the client should have shown the role picker first.
   const userRecord = await getStore().getUser(deckId, session.user.email);
@@ -104,6 +174,14 @@ export async function POST(req: NextRequest) {
       { status: 409 }
     );
   }
+
+  // Audience is derived from the verified role — never trusted from the
+  // client. A client's comment is client-visible; team comments default
+  // to internal (the creative can surface one later via PATCH).
+  const audience: "internal" | "client" =
+    userRecord.role === "client" ? "client" : "internal";
+  const origin =
+    surface === "production" || surface === "staging" ? surface : undefined;
 
   const trimmedBody = commentBody.trim().slice(0, 4000);
   const mentions = extractMentions(trimmedBody);
@@ -119,9 +197,18 @@ export async function POST(req: NextRequest) {
     authorImage: session.user.image ?? undefined,
     role: userRecord.role,
     status: "open",
+    audience,
     createdAt: new Date().toISOString(),
     ...(mentions.length > 0 ? { mentions } : {}),
     ...(validatedPin ? { pin: validatedPin } : {}),
+    ...(validatedAnchor ? { anchor: validatedAnchor } : {}),
+    ...(origin ? { origin } : {}),
+    ...(typeof anchorContentHash === "string"
+      ? { anchorContentHash: anchorContentHash.slice(0, 128) }
+      : {}),
+    ...(typeof anchorVersion === "string"
+      ? { anchorVersion: anchorVersion.slice(0, 64) }
+      : {}),
   };
 
   await getStore().create(comment);
@@ -259,12 +346,14 @@ export async function PATCH(req: NextRequest) {
     status,
     body: newBody,
     queued,
+    audience,
   } = body as {
     deckId?: string;
     commentId?: string;
     status?: string;
     body?: string;
     queued?: boolean;
+    audience?: string;
   };
 
   if (!deckId || !commentId) {
@@ -274,16 +363,33 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  // Three PATCH modes: body edit (own comment only), queue toggle
-  // (creative-only), or status change. Body edits and queue toggles
-  // both check `body`/`queued` first because they're more specific;
-  // status falls through as the default.
+  // PATCH modes: body edit (own comment only), queue toggle
+  // (creative-only), audience toggle (creative-only), or status change.
+  // The more-specific fields are checked first; status falls through as
+  // the default.
   if (typeof queued === "boolean") {
     const userRecord = await getStore().getUser(deckId, session.user.email);
     if (!canCurate(session.user.email, userRecord?.role)) {
       return NextResponse.json({ error: "not authorized" }, { status: 403 });
     }
     const updated = await getStore().setQueued(deckId, commentId, queued);
+    if (!updated) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    return NextResponse.json({ comment: updated });
+  }
+
+  // Surface an internal comment to the client, or retract one. Creative
+  // only — controlling what the client sees is a publish-adjacent act.
+  if (typeof audience === "string") {
+    if (audience !== "internal" && audience !== "client") {
+      return NextResponse.json({ error: "invalid audience" }, { status: 400 });
+    }
+    const userRecord = await getStore().getUser(deckId, session.user.email);
+    if (!canCurate(session.user.email, userRecord?.role)) {
+      return NextResponse.json({ error: "not authorized" }, { status: 403 });
+    }
+    const updated = await getStore().setVisibility(deckId, commentId, audience);
     if (!updated) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }

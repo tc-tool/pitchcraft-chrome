@@ -9,6 +9,45 @@
 export type CommentRole = "creative" | "producer" | "client";
 export type CommentStatus = "open" | "resolved";
 
+/**
+ * Who may see a comment. The no-leak boundary: the production (client)
+ * surface only ever renders `client` comments. Derived server-side from
+ * the author's verified role — never trusted from the client.
+ */
+export type CommentAudience = "internal" | "client";
+
+/** Which surface a comment was created on. Context only, not a gate. */
+export type CommentOrigin = "production" | "staging";
+
+/**
+ * How a comment attaches to a slide. Supersedes the legacy `pin` (a bare
+ * {x,y}). A comment may carry an `anchor` OR a `pin` (or neither =
+ * slide-level); the host renders whichever is present, preferring
+ * `anchor`.
+ *   - slide:   the whole slide
+ *   - element: a tagged content part — the renderer emits
+ *              `data-anchor="<part>"` (e.g. "headline", "bullet.2", "image")
+ *   - region:  a normalized box — for images, the WebGL slides, freeform
+ */
+export type CommentAnchor =
+  | { scope: "slide" }
+  | { scope: "element"; part: string; quote?: string }
+  | {
+      scope: "region";
+      rect: { x: number; y: number; w: number; h: number };
+      quote?: string;
+    };
+
+/**
+ * Link back to the change that addressed a comment. Populated by the
+ * traceability loop (queue dispatch + PR-merge webhook), not by users.
+ */
+export interface CommentResolution {
+  prNumber?: number;
+  prUrl?: string;
+  mergedAt?: string;
+}
+
 export interface Comment {
   /** Unique id, generated server-side. */
   id: string;
@@ -53,6 +92,35 @@ export interface Comment {
    * slide-level (not anchored to a specific spot).
    */
   pin?: { x: number; y: number } | null;
+  /**
+   * Who may see this comment. Derived server-side from the author's
+   * verified role: a `client` comment is `client`-visible; `creative` /
+   * `producer` comments default to `internal`. The creative can later
+   * surface an internal comment to the client. Legacy comments (no
+   * `audience`) are treated as `internal` — old internal notes never leak
+   * onto the client surface.
+   */
+  audience?: CommentAudience;
+  /** Surface the comment was created on (production / staging). Context only. */
+  origin?: CommentOrigin;
+  /**
+   * Richer anchor (element / region / slide). When present the host
+   * renders this instead of `pin`; `pin` stays for back-compat.
+   */
+  anchor?: CommentAnchor;
+  /**
+   * Hash + version of the anchored content at creation time, supplied by
+   * the host (chrome stays content-agnostic). On render the host compares
+   * to the current content to badge "changed since this note" — the
+   * honest signal that the deck moved (e.g. after a PUSH or Claude rewrite).
+   */
+  anchorContentHash?: string;
+  anchorVersion?: string;
+  /**
+   * Link to the change that addressed this comment. Set by the
+   * traceability loop, not by users.
+   */
+  resolution?: CommentResolution;
   /** ISO 8601 */
   createdAt: string;
   /** ISO 8601, set when the author edits the body after posting. */
