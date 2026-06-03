@@ -309,16 +309,17 @@ export function CommentPanel({
     <motion.div
       data-print-hide
       data-comments-layer
-      initial={{ x: 24, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      exit={{ x: 24, opacity: 0 }}
+      // Rises from the dock below (which becomes its bottom bar) rather
+      // than sliding in from the right — the panel + dock read as one
+      // module that grows upward when Comments is clicked.
+      initial={{ y: 16, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 16, opacity: 0 }}
       transition={{
         // Fade in fast so there's no long "see-through" window during
-        // entrance — keeps the slide animation smooth without the deck
-        // text reading through a half-faded panel. Durations + ease
-        // pulled from the centralized chrome motion language so the
-        // panel, pills, and popovers all settle to the same rhythm.
-        x: { duration: CHROME_DURATION.panel, ease: CHROME_EASE.standard },
+        // entrance. Durations + ease pulled from the centralized chrome
+        // motion language so the panel, pills, and dock share a rhythm.
+        y: { duration: CHROME_DURATION.panel, ease: CHROME_EASE.standard },
         opacity: { duration: CHROME_DURATION.hover, ease: CHROME_EASE.standard },
       }}
       // Pin the stacking context: explicit z-index + isolation, so the
@@ -392,7 +393,10 @@ export function CommentPanel({
           // context so the blur sampling stays stable.
           willChange: "transform",
         }}
-        className={`flex h-full w-full flex-col overflow-hidden rounded-3xl text-[#111] [isolation:isolate] ${PANEL_SURFACE}`}
+        // Square the BOTTOM edge so it sits flush on top of the dock
+        // (which rounds only its bottom corners when open) — together they
+        // read as one continuous rounded module.
+        className={`flex h-full w-full flex-col overflow-hidden rounded-t-3xl text-[#111] [isolation:isolate] ${PANEL_SURFACE}`}
       >
       <PanelHeader
         slideId={slideId}
