@@ -93,6 +93,13 @@ interface CommentPanelProps {
    * copy edits live (Claude API → overlay) instead of opening a PR.
    */
   onApplyInstant?: () => Promise<{ applied: number; skipped: number }>;
+  /**
+   * Fires when the panel is dragged off the dock (detached) or snapped
+   * back onto it. The host uses it to un-fuse the dock: while docked the
+   * dock is the panel's bottom bar (squared join); once detached, both
+   * regain their own rounded corners.
+   */
+  onDetachedChange?: (detached: boolean) => void;
   /** @deprecated kept for back-compat; ignored now that role is per-user. */
   defaultRole?: CommentRole;
 }
@@ -165,6 +172,7 @@ export function CommentPanel({
   slideContentHash,
   deckVersion,
   onApplyInstant,
+  onDetachedChange,
 }: CommentPanelProps) {
   // Tabbed view: comments (default) or outline (deck-wide slide list).
   // Outline tab only shows when the host opted in by passing `outline`.
@@ -257,12 +265,23 @@ export function CommentPanel({
   const dragY = useMotionValue(0);
   const dragControls = useDragControls();
 
+  // Detached = dragged off the dock. While docked, the panel's bottom is
+  // square (flush with the dock); detached, it regains rounded corners
+  // and the host un-fuses the dock (see onDetachedChange).
+  const [detached, setDetached] = useState(false);
+  useEffect(() => {
+    onDetachedChange?.(detached);
+  }, [detached, onDetachedChange]);
+
   const handleDragStart = () => {
     // Lock text selection on the page while the panel is in flight.
     // Without this, dragging over deck text triggers native selection
     // because the cursor passes through selectable content.
     document.body.style.userSelect = "none";
     document.body.style.webkitUserSelect = "none";
+    // Lifting off the dock — un-fuse immediately so the corners round as
+    // it moves.
+    setDetached(true);
   };
 
   const handleDragEnd = () => {
@@ -273,6 +292,8 @@ export function CommentPanel({
     if (dist < SNAP_RANGE) {
       animate(dragX, 0, { type: "spring", stiffness: 380, damping: 28 });
       animate(dragY, 0, { type: "spring", stiffness: 380, damping: 28 });
+      // Snapped back onto the dock → re-fuse.
+      setDetached(false);
     }
   };
 
@@ -393,10 +414,13 @@ export function CommentPanel({
           // context so the blur sampling stays stable.
           willChange: "transform",
         }}
-        // Square the BOTTOM edge so it sits flush on top of the dock
-        // (which rounds only its bottom corners when open) — together they
-        // read as one continuous rounded module.
-        className={`flex h-full w-full flex-col overflow-hidden rounded-t-3xl text-[#111] [isolation:isolate] ${PANEL_SURFACE}`}
+        // Docked: square the BOTTOM edge so it sits flush on top of the
+        // dock (which rounds only its bottom corners) — one continuous
+        // module. Detached (dragged off): round the bottom too, so it's a
+        // standalone rounded panel again.
+        className={`flex h-full w-full flex-col overflow-hidden rounded-t-3xl ${
+          detached ? "rounded-b-3xl" : ""
+        } text-[#111] [isolation:isolate] ${PANEL_SURFACE}`}
       >
       <PanelHeader
         slideId={slideId}
