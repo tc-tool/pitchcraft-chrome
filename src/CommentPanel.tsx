@@ -87,6 +87,12 @@ interface CommentPanelProps {
   slideContentHash?: string;
   /** Deck content version stamped alongside the hash (e.g. meta.lastUpdated). */
   deckVersion?: string;
+  /**
+   * Instant content-edit hook — passed through to the QueueBar's "Apply
+   * now" action (the §2.1 fast path). When set, sending feedback applies
+   * copy edits live (Claude API → overlay) instead of opening a PR.
+   */
+  onApplyInstant?: () => Promise<{ applied: number; skipped: number }>;
   /** @deprecated kept for back-compat; ignored now that role is per-user. */
   defaultRole?: CommentRole;
 }
@@ -158,6 +164,7 @@ export function CommentPanel({
   outline,
   slideContentHash,
   deckVersion,
+  onApplyInstant,
 }: CommentPanelProps) {
   // Tabbed view: comments (default) or outline (deck-wide slide list).
   // Outline tab only shows when the host opted in by passing `outline`.
@@ -578,7 +585,7 @@ export function CommentPanel({
               scroll list and the composer so it pins above the
               composer regardless of how short the comments list is.
               Renders nothing for empty queue / non-curator viewers. */}
-          <QueueBar />
+          <QueueBar onApplyInstant={onApplyInstant} />
 
           <div className="border-t border-black/[0.10] px-6 pb-6 pt-4">
             {/* Auth-flow crossfade: loading → sign-in → composer.

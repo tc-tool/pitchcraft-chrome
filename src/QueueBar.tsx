@@ -15,6 +15,15 @@ interface QueueBarProps {
    * Optional; falls back to the deckId slug.
    */
   deckTitle?: string;
+  /**
+   * Instant content-edit hook (the §2.1 fast path). When provided, the
+   * modal's primary action becomes "Apply now" — the host applies the
+   * queued copy feedback via the Claude API → content overlay and
+   * refreshes the deck. Returns how many slides were applied vs skipped
+   * (skipped = needs a code change → Send via GitHub). When absent, the
+   * modal behaves as before (GitHub / Copy only).
+   */
+  onApplyInstant?: () => Promise<{ applied: number; skipped: number }>;
 }
 
 /**
@@ -26,7 +35,7 @@ interface QueueBarProps {
  * Also renders nothing when the queue is empty (no noise when there's
  * nothing to act on).
  */
-export function QueueBar({ deckTitle }: QueueBarProps) {
+export function QueueBar({ deckTitle, onApplyInstant }: QueueBarProps) {
   const { user } = useCurrentUser();
   const { queue, compile, clear } = useQueue();
   const [modalOpen, setModalOpen] = useState(false);
@@ -80,6 +89,7 @@ export function QueueBar({ deckTitle }: QueueBarProps) {
             promptText={compile(deckTitle)}
             count={queue.length}
             deckTitle={deckTitle}
+            onApplyInstant={onApplyInstant}
             onClose={() => setModalOpen(false)}
           />
         )}
@@ -94,6 +104,7 @@ interface CompilePromptModalProps {
   promptText: string;
   count: number;
   deckTitle?: string;
+  onApplyInstant?: () => Promise<{ applied: number; skipped: number }>;
   onClose: () => void;
 }
 
@@ -104,10 +115,18 @@ interface DispatchResult {
   error?: string;
 }
 
+interface ApplyResult {
+  ok: boolean;
+  applied?: number;
+  skipped?: number;
+  error?: string;
+}
+
 function CompilePromptModal({
   promptText,
   count,
   deckTitle,
+  onApplyInstant,
   onClose,
 }: CompilePromptModalProps) {
   const deckId = useDeckId();
@@ -115,6 +134,25 @@ function CompilePromptModal({
   const [dispatching, setDispatching] = useState(false);
   const [dispatchResult, setDispatchResult] =
     useState<DispatchResult | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+
+  const onApply = async () => {
+    if (!onApplyInstant) return;
+    setApplying(true);
+    setApplyResult(null);
+    try {
+      const r = await onApplyInstant();
+      setApplyResult({ ok: true, applied: r.applied, skipped: r.skipped });
+    } catch (e) {
+      setApplyResult({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setApplying(false);
+    }
+  };
 
   // The comment panel itself animates with a CSS transform, which
   // creates a containing block that traps any descendant
@@ -197,9 +235,9 @@ function CompilePromptModal({
               Send {count} comment{count === 1 ? "" : "s"} to Claude
             </h2>
             <p className="mt-1 text-[12px] leading-relaxed text-black/60">
-              Send via GitHub opens a pull request you can review and
-              merge. Copy lets you paste the prompt into a Claude Code
-              session yourself.
+              {onApplyInstant
+                ? "Apply now rewrites the copy and shows it on staging in seconds. Send via GitHub opens a code change for anything bigger. Copy pastes the prompt into your own Claude Code session."
+                : "Send via GitHub opens a pull request you can review and merge. Copy lets you paste the prompt into a Claude Code session yourself."}
             </p>
           </div>
           <button
@@ -250,6 +288,28 @@ function CompilePromptModal({
               )}
             </div>
           )}
+
+          {applyResult && (
+            <div
+              className={`mt-3 rounded-lg p-3 text-[12px] leading-relaxed ${
+                applyResult.ok
+                  ? "bg-emerald-50 text-emerald-900 ring-1 ring-emerald-200"
+                  : "bg-red-50 text-red-900 ring-1 ring-red-200"
+              }`}
+            >
+              {applyResult.ok ? (
+                <>
+                  Applied to {applyResult.applied} slide
+                  {applyResult.applied === 1 ? "" : "s"} — live on staging now.
+                  {applyResult.skipped
+                    ? ` ${applyResult.skipped} need a code change — use Send via GitHub.`
+                    : ""}
+                </>
+              ) : (
+                <>Failed: {applyResult.error}</>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 px-6 pb-5">
@@ -271,7 +331,11 @@ function CompilePromptModal({
             type="button"
             onClick={onDispatch}
             disabled={dispatching || dispatchResult?.ok}
-            className="rounded-full bg-[#111] px-4 py-1.5 text-[12px] font-medium text-white hover:bg-black disabled:opacity-60 disabled:cursor-wait"
+            className={
+              onApplyInstant
+                ? "rounded-full bg-black/[0.06] px-4 py-1.5 text-[12px] font-medium text-[#111] hover:bg-black/[0.10] disabled:opacity-60 disabled:cursor-wait"
+                : "rounded-full bg-[#111] px-4 py-1.5 text-[12px] font-medium text-white hover:bg-black disabled:opacity-60 disabled:cursor-wait"
+            }
           >
             {dispatching
               ? "Sending…"
@@ -279,6 +343,16 @@ function CompilePromptModal({
                 ? "Sent ✓"
                 : "Send via GitHub"}
           </button>
+          {onApplyInstant && (
+            <button
+              type="button"
+              onClick={onApply}
+              disabled={applying || applyResult?.ok}
+              className="rounded-full bg-[#111] px-4 py-1.5 text-[12px] font-medium text-white hover:bg-black disabled:opacity-60 disabled:cursor-wait"
+            >
+              {applying ? "Applying…" : applyResult?.ok ? "Applied ✓" : "Apply now"}
+            </button>
+          )}
         </div>
       </motion.div>
     </motion.div>,
