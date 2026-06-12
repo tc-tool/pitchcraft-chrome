@@ -13,7 +13,7 @@
  */
 
 export interface CreateClaudeIssueOpts {
-  /** `owner/name` of the deck repo, e.g. `tc-tool/pitchcraft`. */
+  /** `owner/name` of the deck repo, e.g. `tooldigital/pitchcraft`. */
   repo: string;
   /** PAT or GitHub App token with `issues:write` on `repo`. */
   token: string;

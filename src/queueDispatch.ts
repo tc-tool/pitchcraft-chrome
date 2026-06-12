@@ -25,7 +25,7 @@ import { notifySlackHeard, heardRecipients } from "./notifySlack";
  *                            issues:write on the target repo. Stored
  *                            on the deck's Railway service.
  *   PITCHCRAFT_GH_REPO     — "owner/name" of the deck repo (e.g.
- *                            "tc-tool/pitchcraft"). The factory sets
+ *                            "tooldigital/pitchcraft"). The factory sets
  *                            this when spinning up each deck.
  *
  * Body shape:

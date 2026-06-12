@@ -39,7 +39,7 @@ Pitchcraft is built in three distinct layers. Every change to the system lives i
 
 What changes wildly from pitch to pitch. Each deck's expressive identity: the slides, their typography, their motion, brand colors, custom slide types, eyebrows, surface treatments. A deck for a luxury fashion client doesn't look anything like a deck for a streaming franchise — and shouldn't.
 
-Owned by: **the deck repo** (e.g. `tc-tool/pitchcraft`, `tc-tool/rings-s3`).
+Owned by: **the deck repo** (e.g. `tooldigital/pitchcraft`, `tc-tool/rings-s3`).
 
 Lives in: `content/deck.content.ts`, `components/deck/slides/*`, the deck's own brand tokens, motion constants for slide transitions.
 
@@ -123,7 +123,7 @@ Anything in this list should be **actively refused** unless we formally amend th
 └── <slug>/              per-deck checkouts created by the factory
 ```
 
-- **chrome** is a published npm package. Every deck pulls it via `git+https://github.com/tc-tool/pitchcraft-chrome.git#main` (or a specific commit hash). Updates ship to all decks via `npm update`. Chrome owns the **interaction model** (the behavior contract from §6.2); it also ships **default UI** components. Decks may use the default UI as-is or override the look — see §1.1 + §6.
+- **chrome** is a published npm package. Every deck pulls it via `git+https://github.com/tooldigital/pitchcraft-chrome.git#main` (or a specific commit hash). Updates ship to all decks via `npm update`. Chrome owns the **interaction model** (the behavior contract from §6.2); it also ships **default UI** components. Decks may use the default UI as-is or override the look — see §1.1 + §6.
 - **Boilerplate** is both the template *and* the live Pitchcraft deck. The factory clones from it.
 - **factory** is a shell script + GraphQL/CLI calls that handles GitHub repo creation, Railway provisioning, Cloudflare DNS, env vars, and prints a Google OAuth checklist.
 - **Per-deck folders** (e.g. `rings-s3`) are factory output. Each is its own git repo and Railway project.
