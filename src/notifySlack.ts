@@ -39,6 +39,25 @@
 
 import type { Comment } from "./types";
 
+/**
+ * Escape the three characters Slack treats specially in message text
+ * (`&`, `<`, `>`) per Slack's documented escaping rules. Without this, an
+ * attacker-controllable value (a comment body, or a Google display name)
+ * could inject a clickable `<url|label>` link or fake `<@U…>` mention into
+ * a trusted internal Slack DM — a phishing vector. `&` must be escaped
+ * first so we don't double-escape the entities we just produced.
+ *
+ * Note: this is for text we interpolate into mrkdwn/plain_text content
+ * only — NOT for the `<url|label>` link syntax or `<@id>` tokens the code
+ * builds itself from trusted values.
+ */
+function escapeSlack(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 interface SlackMentionInput {
   comment: Comment;
   /** Deck title from deckContent.meta.title — surfaced in the Slack message. */
@@ -145,24 +164,35 @@ export async function notifySlackMention(
     mentionedEmails.map((email) => lookupSlackUserId(email, botToken))
   );
 
+  // Escape all attacker-controllable strings before they land in mrkdwn:
+  // the Google display name (authorName + mention fallbacks) and the
+  // comment body. The `<@id>` tokens and `<url|label>` link are built from
+  // trusted values, so they're assembled AFTER escaping the user text.
+  const safeAuthorName = escapeSlack(comment.authorName);
+  const safeRole = escapeSlack(comment.role);
+  const safeDeckTitle = escapeSlack(deckTitle);
+
   const mentionTokens = mentionedEmails.map((email, i) => {
     const id = slackIds[i];
     if (id) return `<@${id}>`;
-    return `*${mentionedDisplay[i] ?? email}*`;
+    return `*${escapeSlack(mentionedDisplay[i] ?? email)}*`;
   });
 
   const mentionLine =
     mentionTokens.length > 0 ? mentionTokens.join(", ") : "*someone*";
 
   // Strip internal `<@email>` tokens from the body — Slack would render
-  // them as literal text and they look ugly.
-  const body = comment.body
-    .replace(/<@([^>\s]+)>/g, "@$1")
-    .slice(0, 500);
+  // them as literal text and they look ugly — THEN escape, so a body that
+  // contains literal `<`, `>` or `&` can't forge links or mentions.
+  const body = escapeSlack(
+    comment.body.replace(/<@([^>\s]+)>/g, "@$1").slice(0, 500)
+  );
 
-  const fallbackText = `${comment.authorName} mentioned ${
-    mentionedDisplay.join(", ") || "someone"
-  } in ${deckTitle} — ${comment.slideId}`;
+  // fallbackText is plain notification text; escape the user-supplied
+  // parts there too for consistency.
+  const fallbackText = `${safeAuthorName} mentioned ${
+    mentionedDisplay.map((d) => escapeSlack(d)).join(", ") || "someone"
+  } in ${safeDeckTitle} — ${comment.slideId}`;
 
   // ─── Channel mode ───────────────────────────────────────────────
   if (explicitChannel) {
@@ -171,7 +201,7 @@ export async function notifySlackMention(
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `${mentionLine} mentioned in *${deckTitle}* — slide \`${comment.slideId}\``,
+          text: `${mentionLine} mentioned in *${safeDeckTitle}* — slide \`${comment.slideId}\``,
         },
       },
       {
@@ -186,7 +216,7 @@ export async function notifySlackMention(
         elements: [
           {
             type: "mrkdwn",
-            text: `by *${comment.authorName}* (${comment.role}) · <${deckUrl}|Open in deck →>`,
+            text: `by *${safeAuthorName}* (${safeRole}) · <${deckUrl}|Open in deck →>`,
           },
         ],
       },
@@ -210,7 +240,7 @@ export async function notifySlackMention(
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `You were mentioned in *${deckTitle}* — slide \`${comment.slideId}\``,
+        text: `You were mentioned in *${safeDeckTitle}* — slide \`${comment.slideId}\``,
       },
     },
     {
@@ -225,7 +255,7 @@ export async function notifySlackMention(
       elements: [
         {
           type: "mrkdwn",
-          text: `by *${comment.authorName}* (${comment.role}) · <${deckUrl}|Open in deck →>`,
+          text: `by *${safeAuthorName}* (${safeRole}) · <${deckUrl}|Open in deck →>`,
         },
       ],
     },
@@ -319,14 +349,21 @@ export async function notifySlackHeard(input: SlackHeardInput): Promise<void> {
 
   const headline = HEARD_HEADLINE[kind];
   const subtext = HEARD_SUBTEXT[kind];
-  const contextBits = [detail, `<${deckUrl}|Open in deck →>`].filter(Boolean);
+  // Escape user-supplied / host-supplied values (deckTitle, detail) before
+  // they land in mrkdwn; headline/subtext are constants and deckUrl is the
+  // trusted link target built into `<url|label>` syntax.
+  const safeDeckTitle = escapeSlack(deckTitle);
+  const safeDetail = detail ? escapeSlack(detail) : undefined;
+  const contextBits = [safeDetail, `<${deckUrl}|Open in deck →>`].filter(
+    Boolean
+  );
 
   const blocks = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${headline} — *${deckTitle}*`,
+        text: `${headline} — *${safeDeckTitle}*`,
       },
     },
     {
@@ -338,7 +375,7 @@ export async function notifySlackHeard(input: SlackHeardInput): Promise<void> {
       elements: [{ type: "mrkdwn", text: contextBits.join(" · ") }],
     },
   ];
-  const fallbackText = `${headline} — ${deckTitle}`;
+  const fallbackText = `${headline} — ${safeDeckTitle}`;
 
   await Promise.all(
     targets.map((id) => postSlackMessage(id, blocks, fallbackText, botToken))

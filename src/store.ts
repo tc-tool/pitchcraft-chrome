@@ -301,11 +301,15 @@ class RedisCommentsStore implements CommentsStore {
   }
 
   async create(comment: Comment): Promise<Comment> {
-    const pipeline = this.redis.pipeline();
-    pipeline.set(k.item(comment.deckId, comment.id), JSON.stringify(comment));
-    pipeline.sadd(k.all(comment.deckId), comment.id);
-    pipeline.sadd(k.bySlide(comment.deckId, comment.slideId), comment.id);
-    await pipeline.exec();
+    // MULTI (transaction), not a bare pipeline: the comment blob and its
+    // two index memberships must move together. A pipeline can partially
+    // apply under failure, leaving an index pointing at a missing item;
+    // MULTI is all-or-nothing.
+    const tx = this.redis.multi();
+    tx.set(k.item(comment.deckId, comment.id), JSON.stringify(comment));
+    tx.sadd(k.all(comment.deckId), comment.id);
+    tx.sadd(k.bySlide(comment.deckId, comment.slideId), comment.id);
+    await tx.exec();
     return comment;
   }
 
@@ -394,14 +398,17 @@ class RedisCommentsStore implements CommentsStore {
       await this.redis.get(k.item(deckId, commentId))
     );
     if (!existing) return false;
-    const pipeline = this.redis.pipeline();
-    pipeline.del(k.item(deckId, commentId));
-    pipeline.srem(k.all(deckId), commentId);
-    pipeline.srem(k.bySlide(deckId, existing.slideId), commentId);
+    // MULTI: the item delete and all index removals (collection set,
+    // by-slide set, queue side-index) must apply together so no index is
+    // left dangling at a removed comment.
+    const tx = this.redis.multi();
+    tx.del(k.item(deckId, commentId));
+    tx.srem(k.all(deckId), commentId);
+    tx.srem(k.bySlide(deckId, existing.slideId), commentId);
     // Defensive: also drop from the queue index so a deleted comment
     // never re-surfaces in the "send to Claude" compile.
-    pipeline.srem(k.queued(deckId), commentId);
-    await pipeline.exec();
+    tx.srem(k.queued(deckId), commentId);
+    await tx.exec();
     return true;
   }
 
@@ -424,10 +431,10 @@ class RedisCommentsStore implements CommentsStore {
       name: name ?? existing?.name,
       firstSeenAt: existing?.firstSeenAt ?? new Date().toISOString(),
     };
-    const pipeline = this.redis.pipeline();
-    pipeline.set(k.user(deckId, email), JSON.stringify(record));
-    pipeline.sadd(k.users(deckId), record.email);
-    await pipeline.exec();
+    const tx = this.redis.multi();
+    tx.set(k.user(deckId, email), JSON.stringify(record));
+    tx.sadd(k.users(deckId), record.email);
+    await tx.exec();
     return record;
   }
 
@@ -501,14 +508,19 @@ class RedisCommentsStore implements CommentsStore {
     if (!existing) return null;
     const updated: Comment = { ...existing, queued };
 
-    const pipeline = this.redis.pipeline();
-    pipeline.set(k.item(deckId, commentId), JSON.stringify(updated));
+    // MULTI (transaction), not a bare pipeline: the comment's `queued`
+    // flag and the queued side-index set must move in lockstep. With a
+    // plain pipeline a partial failure could leave the flag set but the
+    // index missing it (or vice-versa) — the queue then drifts from the
+    // comments. MULTI makes the two writes atomic.
+    const tx = this.redis.multi();
+    tx.set(k.item(deckId, commentId), JSON.stringify(updated));
     if (queued) {
-      pipeline.sadd(k.queued(deckId), commentId);
+      tx.sadd(k.queued(deckId), commentId);
     } else {
-      pipeline.srem(k.queued(deckId), commentId);
+      tx.srem(k.queued(deckId), commentId);
     }
-    await pipeline.exec();
+    await tx.exec();
     return updated;
   }
 
@@ -531,18 +543,20 @@ class RedisCommentsStore implements CommentsStore {
     // whole side-index set in the same pipeline.
     const itemKeys = ids.map((id) => k.item(deckId, id));
     const blobs = await this.redis.mget(...itemKeys);
-    const pipeline = this.redis.pipeline();
+    // MULTI: flip every queued flag off AND drop the side-index set in one
+    // atomic step, so the per-comment flags and the index can't diverge.
+    const tx = this.redis.multi();
     blobs.forEach((b, i) => {
       const existing = parseJson<Comment>(b);
       if (existing) {
-        pipeline.set(
+        tx.set(
           k.item(deckId, ids[i]),
           JSON.stringify({ ...existing, queued: false })
         );
       }
     });
-    pipeline.del(k.queued(deckId));
-    await pipeline.exec();
+    tx.del(k.queued(deckId));
+    await tx.exec();
   }
 
   async getDeletedSlides(deckId: string): Promise<Set<string>> {

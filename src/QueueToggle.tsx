@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useCurrentUser } from "./useCurrentUser";
+import { useIsVerifiedTeam } from "./useIsVerifiedTeam";
 import { canCurate } from "./permissions";
 import type { Comment } from "./types";
 
@@ -33,9 +34,11 @@ interface QueueToggleProps {
  */
 export function QueueToggle({ comment, onToggle }: QueueToggleProps) {
   const { user } = useCurrentUser();
+  const isVerifiedTeam = useIsVerifiedTeam();
   const [pending, setPending] = useState(false);
 
-  if (!user || !canCurate(user.email, user.role)) return null;
+  if (!user || !canCurate(user.email, user.role, { isVerifiedTeam }))
+    return null;
 
   // Replies don't need their own checkbox — the root thread is what
   // Claude implements. Hiding them keeps the panel uncluttered.

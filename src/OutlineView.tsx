@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "framer-motion";
 import { useCurrentUser } from "./useCurrentUser";
+import { useIsVerifiedTeam } from "./useIsVerifiedTeam";
 import { useReorder } from "./useReorder";
 import { useSlideMutations } from "./useSlideMutations";
 import { canCurate, canReorderSlides } from "./permissions";
@@ -43,14 +44,18 @@ export function OutlineView({
 }: OutlineViewProps) {
   const { data: session } = useSession();
   const { user } = useCurrentUser();
+  const isVerifiedTeam = useIsVerifiedTeam();
   const { order: overlayOrder, setOrder, clearOrder } = useReorder();
   const slideMutations = useSlideMutations();
   const router = useRouter();
 
-  const canReorder = canReorderSlides(session?.user?.email, user?.role);
+  // Pass the server-trusted verified-team flag so the UI gate matches what
+  // the server will permit (owner allowlist OR verified toolofna.com).
+  const ctx = { isVerifiedTeam };
+  const canReorder = canReorderSlides(session?.user?.email, user?.role, ctx);
   // Add/delete is a stronger gate than reorder — writes to source.
   // Same gate as Publish (creative + email allowlist).
-  const canMutate = canCurate(session?.user?.email, user?.role);
+  const canMutate = canCurate(session?.user?.email, user?.role, ctx);
 
   // Local list state — drives the Reorder.Group. Initialized from the
   // effective order (overlay applied to source) so the list matches

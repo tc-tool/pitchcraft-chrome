@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAccent } from "./useAccent";
 import { useCurrentUser } from "./useCurrentUser";
+import { useIsVerifiedTeam } from "./useIsVerifiedTeam";
 import { canCurate } from "./permissions";
 import {
   CHROME_PILL_BASE,
@@ -72,10 +73,12 @@ export function AccentSwatch({
   presets = PRESETS,
 }: AccentSwatchProps) {
   const { user } = useCurrentUser();
+  const isVerifiedTeam = useIsVerifiedTeam();
   const { accent, setAccent, clearAccent, busy } = useAccent();
   const [open, setOpen] = useState(false);
 
-  if (!user || !canCurate(user.email, user.role)) return null;
+  if (!user || !canCurate(user.email, user.role, { isVerifiedTeam }))
+    return null;
 
   const current = accent ?? DEFAULT_ACCENT;
 

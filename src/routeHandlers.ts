@@ -1,9 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "./authConfig";
+import { auth, sessionIsVerifiedTeam } from "./authConfig";
 import { notifySlackMention } from "./notifySlack";
-import { canCurate, canReorderSlides } from "./permissions";
+import {
+  canCurate,
+  canReorderSlides,
+  isVerifiedTeamIdentity,
+} from "./permissions";
 import { getStore } from "./store";
 import type { Comment, CommentAnchor, CommentRole, CommentStatus } from "./types";
+
+/**
+ * deckId is interpolated directly into Redis key namespaces
+ * (`comments:{deckId}:…`). A deckId containing `:` (or other separators)
+ * could collide with or escape its namespace on a shared Redis. Decks are
+ * created by the factory from a URL-safe slug, so a strict slug regex is
+ * the right shape. Validate at every route entry before the value can
+ * reach the store.
+ */
+const DECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+export function isValidDeckId(deckId: unknown): deckId is string {
+  return (
+    typeof deckId === "string" &&
+    deckId.length > 0 &&
+    deckId.length <= 100 &&
+    DECK_ID_RE.test(deckId)
+  );
+}
 
 /**
  * Pull `<@email>` tokens out of a comment body, dedupe, lowercase.
@@ -79,6 +102,30 @@ function validateAnchor(raw: unknown): CommentAnchor | null {
 const VALID_ROLES: CommentRole[] = ["creative", "producer", "client"];
 const VALID_STATUSES: CommentStatus[] = ["open", "resolved"];
 
+/**
+ * Resolve the deck's public base URL for outbound links (e.g. the
+ * "Open in deck" link in a Slack DM). Prefer a server-trusted env
+ * constant the factory already sets — the request Host / X-Forwarded-*
+ * headers are attacker-controllable and must not decide where a link in
+ * a trusted internal message points. Fall back to request headers only
+ * when no env is configured (local dev).
+ */
+export function resolveDeckBaseUrl(req: NextRequest): string {
+  const fromEnv =
+    process.env.NEXT_PUBLIC_DECK_URL ??
+    process.env.AUTH_URL ??
+    process.env.NEXTAUTH_URL;
+  if (fromEnv && fromEnv.trim()) {
+    return fromEnv.trim().replace(/\/+$/, "") + "/";
+  }
+  // Local-dev fallback only: derive from request headers.
+  const proto =
+    req.headers.get("x-forwarded-proto") ??
+    (req.url.startsWith("https") ? "https" : "http");
+  const host = req.headers.get("host") ?? "localhost:3000";
+  return `${proto}://${host}/`;
+}
+
 // ─── Comments collection ───────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -86,19 +133,25 @@ export async function GET(req: NextRequest) {
   const deckId = url.searchParams.get("deckId");
   const slideId = url.searchParams.get("slideId") ?? undefined;
 
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
 
-  // Audience gate (no-leak): only the team (creative / producer) sees
-  // internal comments. Clients and anonymous viewers get client-visible
-  // comments only — and a legacy comment with no `audience` counts as
-  // internal, so old internal notes never surface on the client link.
+  // Audience gate (no-leak): only the team sees internal comments.
+  // Clients and anonymous viewers get client-visible comments only — and
+  // a legacy comment with no `audience` counts as internal, so old
+  // internal notes never surface on the client link.
+  //
+  // "Team" here is a VERIFIED team identity (owner allowlist or a
+  // verified toolofna.com Google account), not a self-declared role — a
+  // non-team Google account that set its role to creative/producer must
+  // never read internal threads.
   const session = await auth();
   let isTeam = false;
   if (session?.user?.email) {
-    const userRecord = await getStore().getUser(deckId, session.user.email);
-    isTeam = canReorderSlides(session.user.email, userRecord?.role);
+    isTeam = isVerifiedTeamIdentity(session.user.email, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    });
   }
 
   const comments = await getStore().list(deckId, slideId);
@@ -146,6 +199,9 @@ export async function POST(req: NextRequest) {
       { error: "deckId, slideId, body required" },
       { status: 400 }
     );
+  }
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
 
   // Validate pin if supplied — both coords must be finite numbers in [0,1].
@@ -220,66 +276,15 @@ export async function POST(req: NextRequest) {
   // pings each mentioned user directly. Requiring SLACK_CHANNEL here
   // would silently disable DM mode entirely).
   //
-  // We ALSO synchronously perform an email→Slack-ID lookup just for
-  // diagnostic purposes and return the result on the response as
-  // `_slackDebug`. This is temporary — the moment DMs are landing
-  // reliably we can strip it. The point is to surface lookup failures
-  // (missing scope, wrong email, revoked token) somewhere a user can
-  // see them without spelunking through deploy logs.
-  let slackDebug: unknown = undefined;
-
+  // Diagnostics for failed email→Slack-ID lookups (missing scope, wrong
+  // email, revoked token) are logged SERVER-SIDE only by notifySlack.
+  // We must NOT return Slack member IDs, ok flags, or raw Slack error
+  // strings to the comment author: that's reconnaissance for targeted
+  // phishing. The response carries only the created comment.
   if (mentions.length > 0 && process.env.SLACK_BOT_TOKEN) {
     console.log(
       `[notifySlack] firing for ${mentions.length} mention(s) on comment ${comment.id} (mode=${process.env.SLACK_CHANNEL?.trim() ? "channel" : "dm"})`
     );
-
-    // Synchronous lookup for the response diagnostic. Cheap (single
-    // Slack API call per mention, 5s timeout) and isolated from the
-    // fire-and-forget post.
-    try {
-      const token = process.env.SLACK_BOT_TOKEN;
-      const lookups = await Promise.all(
-        mentions.map(async (email) => {
-          try {
-            const r = await fetch(
-              `https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`,
-              {
-                headers: { Authorization: `Bearer ${token}` },
-                signal: AbortSignal.timeout(5000),
-              }
-            );
-            const data = (await r.json()) as {
-              ok?: boolean;
-              user?: { id?: string };
-              error?: string;
-            };
-            return {
-              email,
-              ok: !!data.ok,
-              userId: data.user?.id,
-              error: data.error,
-            };
-          } catch (e) {
-            return {
-              email,
-              ok: false,
-              error: e instanceof Error ? e.message : String(e),
-            };
-          }
-        })
-      );
-      slackDebug = {
-        mode: process.env.SLACK_CHANNEL?.trim() ? "channel" : "dm",
-        tokenPresent: true,
-        lookups,
-      };
-    } catch (e) {
-      slackDebug = {
-        mode: "unknown",
-        tokenPresent: true,
-        error: e instanceof Error ? e.message : String(e),
-      };
-    }
 
     // Real send — fire-and-forget.
     void (async () => {
@@ -292,19 +297,13 @@ export async function POST(req: NextRequest) {
           (email) => byEmail.get(email)?.name ?? email
         );
 
-        const proto =
-          req.headers.get("x-forwarded-proto") ??
-          (req.url.startsWith("https") ? "https" : "http");
-        const host = req.headers.get("host") ?? "localhost:3000";
-        const deckUrl = `${proto}://${host}/`;
-
         await notifySlackMention({
           comment,
           // Chrome stays neutral on the host's content schema — we use
           // deckId as a stable identifier. Hosts that want a friendlier
           // title in Slack can wrap the route handler and override this.
           deckTitle: deckId,
-          deckUrl,
+          deckUrl: resolveDeckBaseUrl(req),
           mentionedEmails: mentions,
           mentionedDisplay,
         });
@@ -316,17 +315,9 @@ export async function POST(req: NextRequest) {
     console.log(
       `[notifySlack] skipped — SLACK_BOT_TOKEN not set (had ${mentions.length} mention(s))`
     );
-    slackDebug = {
-      mode: "skipped",
-      tokenPresent: false,
-      note: "SLACK_BOT_TOKEN env var not set on the server",
-    };
   }
 
-  return NextResponse.json(
-    slackDebug ? { comment, _slackDebug: slackDebug } : { comment },
-    { status: 201 }
-  );
+  return NextResponse.json({ comment }, { status: 201 });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -362,6 +353,11 @@ export async function PATCH(req: NextRequest) {
       { status: 400 }
     );
   }
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
+  }
+
+  const teamCtx = { isVerifiedTeam: sessionIsVerifiedTeam(session) };
 
   // PATCH modes: body edit (own comment only), queue toggle
   // (creative-only), audience toggle (creative-only), or status change.
@@ -369,7 +365,7 @@ export async function PATCH(req: NextRequest) {
   // the default.
   if (typeof queued === "boolean") {
     const userRecord = await getStore().getUser(deckId, session.user.email);
-    if (!canCurate(session.user.email, userRecord?.role)) {
+    if (!canCurate(session.user.email, userRecord?.role, teamCtx)) {
       return NextResponse.json({ error: "not authorized" }, { status: 403 });
     }
     const updated = await getStore().setQueued(deckId, commentId, queued);
@@ -386,7 +382,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "invalid audience" }, { status: 400 });
     }
     const userRecord = await getStore().getUser(deckId, session.user.email);
-    if (!canCurate(session.user.email, userRecord?.role)) {
+    if (!canCurate(session.user.email, userRecord?.role, teamCtx)) {
       return NextResponse.json({ error: "not authorized" }, { status: 403 });
     }
     const updated = await getStore().setVisibility(deckId, commentId, audience);
@@ -467,6 +463,9 @@ export async function DELETE(req: NextRequest) {
       { status: 400 }
     );
   }
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
+  }
 
   const existing = await getStore().get(deckId, commentId);
   if (!existing) {
@@ -490,8 +489,8 @@ export async function meGET(req: NextRequest) {
 
   const url = new URL(req.url);
   const deckId = url.searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
 
   const user = await getStore().getUser(deckId, session.user.email);
@@ -517,15 +516,34 @@ export async function mePOST(req: NextRequest) {
       { status: 400 }
     );
   }
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
+  }
 
   if (!(VALID_ROLES as string[]).includes(role)) {
     return NextResponse.json({ error: "invalid role" }, { status: 400 });
   }
 
+  // Team roles (creative / producer) carry team privileges, so they can
+  // only be granted to a VERIFIED team identity (owner allowlist or a
+  // verified toolofna.com Google account). A non-team account that asks
+  // for creative/producer is silently downgraded to `client` — it may
+  // authenticate and comment, but can never self-assign a team role.
+  // Clients legitimately pick `client`; that's always allowed.
+  let effectiveRole = role as CommentRole;
+  if (effectiveRole !== "client") {
+    const isTeam = isVerifiedTeamIdentity(session.user.email, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    });
+    if (!isTeam) {
+      effectiveRole = "client";
+    }
+  }
+
   const user = await getStore().setUser(
     deckId,
     session.user.email,
-    role as CommentRole,
+    effectiveRole,
     session.user.name ?? undefined
   );
 
@@ -537,8 +555,8 @@ export async function mePOST(req: NextRequest) {
 export async function usersGET(req: NextRequest) {
   const url = new URL(req.url);
   const deckId = url.searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   const users = await getStore().listUsers(deckId);
   return NextResponse.json({ users });
@@ -554,8 +572,8 @@ export async function usersGET(req: NextRequest) {
 export async function reorderGET(req: NextRequest) {
   const url = new URL(req.url);
   const deckId = url.searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   const order = await getStore().getReorder(deckId);
   return NextResponse.json({ order });
@@ -573,8 +591,8 @@ export async function reorderPATCH(req: NextRequest) {
   }
 
   const { deckId, order } = body as { deckId?: string; order?: unknown };
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   if (!Array.isArray(order) || !order.every((id) => typeof id === "string")) {
     return NextResponse.json(
@@ -593,8 +611,15 @@ export async function reorderPATCH(req: NextRequest) {
     return true;
   });
 
+  // Producer-capable write — gate on a VERIFIED team identity, not a
+  // self-declared producer/creative role (an outside Google account
+  // must not be able to reorder a client's deck).
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canReorderSlides(session.user.email, userRecord?.role)) {
+  if (
+    !canReorderSlides(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
@@ -610,12 +635,16 @@ export async function reorderDELETE(req: NextRequest) {
 
   const url = new URL(req.url);
   const deckId = url.searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
 
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canReorderSlides(session.user.email, userRecord?.role)) {
+  if (
+    !canReorderSlides(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
@@ -639,8 +668,8 @@ export async function reorderDELETE(req: NextRequest) {
 export async function accentGET(req: NextRequest) {
   const url = new URL(req.url);
   const deckId = url.searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   const accent = await getStore().getAccent(deckId);
   return NextResponse.json({ accent });
@@ -658,8 +687,8 @@ export async function accentPATCH(req: NextRequest) {
   }
 
   const { deckId, accent } = body as { deckId?: string; accent?: unknown };
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   if (typeof accent !== "string" || !accent.trim()) {
     return NextResponse.json(
@@ -669,7 +698,11 @@ export async function accentPATCH(req: NextRequest) {
   }
 
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canCurate(session.user.email, userRecord?.role)) {
+  if (
+    !canCurate(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
@@ -689,12 +722,16 @@ export async function accentDELETE(req: NextRequest) {
   }
 
   const { deckId } = body as { deckId?: string };
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
 
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canCurate(session.user.email, userRecord?.role)) {
+  if (
+    !canCurate(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
@@ -720,8 +757,8 @@ export async function accentDELETE(req: NextRequest) {
 export async function caseStudiesGET(req: NextRequest) {
   const url = new URL(req.url);
   const deckId = url.searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   const caseStudies = await getStore().getCaseStudies(deckId);
   return NextResponse.json({ caseStudies });
@@ -742,8 +779,8 @@ export async function caseStudiesPATCH(req: NextRequest) {
     deckId?: string;
     caseStudies?: unknown;
   };
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   if (!Array.isArray(caseStudies)) {
     return NextResponse.json(
@@ -752,8 +789,15 @@ export async function caseStudiesPATCH(req: NextRequest) {
     );
   }
 
+  // Producer-capable write that materializes into real client-facing
+  // slides — gate on a VERIFIED team identity, not a self-declared
+  // producer role, so an outside account can't inject unsourced content.
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canReorderSlides(session.user.email, userRecord?.role)) {
+  if (
+    !canReorderSlides(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
@@ -775,8 +819,8 @@ export async function caseStudiesPATCH(req: NextRequest) {
 
 export async function publishGET(req: NextRequest) {
   const deckId = new URL(req.url).searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   const published = await getStore().getPublishedContent(deckId);
   return NextResponse.json({ published });
@@ -798,20 +842,23 @@ export async function publishPOST(req: NextRequest) {
     content?: unknown;
   };
 
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
   if (content == null) {
     return NextResponse.json({ error: "content required" }, { status: 400 });
   }
 
-  // Same gate as slide-status writes: creative role + (optionally)
-  // email in NEXT_PUBLIC_DECK_OWNER_EMAILS. Publishing is a deck-wide
-  // action with bigger blast radius than per-slide flips, but the
-  // permission model is the same — anyone who can mark a slide
-  // approved can publish the deck.
+  // Same gate as slide-status writes: a verified team identity acting as
+  // creative, or an email in NEXT_PUBLIC_DECK_OWNER_EMAILS. Publishing is
+  // a deck-wide action with a big blast radius (it ships to clients), so
+  // a self-declared creative on an outside account can never reach it.
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canCurate(session.user.email, userRecord?.role)) {
+  if (
+    !canCurate(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
@@ -841,12 +888,16 @@ export async function queueGET(req: NextRequest) {
   }
 
   const deckId = new URL(req.url).searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
 
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canCurate(session.user.email, userRecord?.role)) {
+  if (
+    !canCurate(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
@@ -865,12 +916,16 @@ export async function queueDELETE(req: NextRequest) {
   }
 
   const deckId = new URL(req.url).searchParams.get("deckId");
-  if (!deckId) {
-    return NextResponse.json({ error: "deckId required" }, { status: 400 });
+  if (!isValidDeckId(deckId)) {
+    return NextResponse.json({ error: "invalid deckId" }, { status: 400 });
   }
 
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canCurate(session.user.email, userRecord?.role)) {
+  if (
+    !canCurate(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return NextResponse.json({ error: "not authorized" }, { status: 403 });
   }
 
