@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePublish } from "./usePublish";
 import { useCurrentUser } from "./useCurrentUser";
+import { useIsVerifiedTeam } from "./useIsVerifiedTeam";
 import { canCurate } from "./permissions";
 import { CHROME_DOCK_ITEM_PRIMARY } from "./surfaceTokens";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
@@ -70,6 +71,7 @@ export function PublishButton({
   loadPreview,
 }: PublishButtonProps) {
   const { user } = useCurrentUser();
+  const isVerifiedTeam = useIsVerifiedTeam();
   const { lastPublished, isPublishing, error, publish } = usePublish();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [justPublished, setJustPublished] = useState(false);
@@ -82,7 +84,8 @@ export function PublishButton({
     return () => clearTimeout(t);
   }, [justPublished]);
 
-  if (!user || !canCurate(user.email, user.role)) return null;
+  if (!user || !canCurate(user.email, user.role, { isVerifiedTeam }))
+    return null;
 
   const onConfirm = async () => {
     try {

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useQueue } from "./useQueue";
 import { useCurrentUser } from "./useCurrentUser";
+import { useIsVerifiedTeam } from "./useIsVerifiedTeam";
 import { useDeckId } from "./CommentsProvider";
 import { canCurate } from "./permissions";
 import { CHROME_DURATION, CHROME_EASE } from "./motion";
@@ -37,10 +38,12 @@ interface QueueBarProps {
  */
 export function QueueBar({ deckTitle, onApplyInstant }: QueueBarProps) {
   const { user } = useCurrentUser();
+  const isVerifiedTeam = useIsVerifiedTeam();
   const { queue, compile, clear } = useQueue();
   const [modalOpen, setModalOpen] = useState(false);
 
-  if (!user || !canCurate(user.email, user.role)) return null;
+  if (!user || !canCurate(user.email, user.role, { isVerifiedTeam }))
+    return null;
   if (queue.length === 0) return null;
 
   return (

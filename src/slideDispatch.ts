@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "./authConfig";
+import { auth, sessionIsVerifiedTeam } from "./authConfig";
 import { canCurate } from "./permissions";
 import { getStore } from "./store";
+import { isValidDeckId } from "./routeHandlers";
 
 /**
  * Slide structural operations — add and delete slides.
@@ -120,14 +121,21 @@ async function guardSlideMutation(
   }
 
   const deckId = body.deckId;
-  if (!deckId) {
+  if (!isValidDeckId(deckId)) {
     return {
-      error: NextResponse.json({ error: "deckId required" }, { status: 400 }),
+      error: NextResponse.json({ error: "invalid deckId" }, { status: 400 }),
     };
   }
 
+  // Structural ops are creative-only AND require a verified team identity
+  // (owner allowlist or a verified toolofna.com account) — a self-declared
+  // creative on an outside Google account must not add/delete slides.
   const userRecord = await getStore().getUser(deckId, session.user.email);
-  if (!canCurate(session.user.email, userRecord?.role)) {
+  if (
+    !canCurate(session.user.email, userRecord?.role, {
+      isVerifiedTeam: sessionIsVerifiedTeam(session),
+    })
+  ) {
     return {
       error: NextResponse.json({ error: "not authorized" }, { status: 403 }),
     };

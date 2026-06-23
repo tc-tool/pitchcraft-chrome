@@ -28,6 +28,7 @@ export {
 
 export { useCurrentUser } from "./useCurrentUser";
 export { useDeckUsers } from "./useDeckUsers";
+export { useIsVerifiedTeam } from "./useIsVerifiedTeam";
 export { colorForAuthor, tintForAuthor, AUTHOR_PALETTE } from "./authorColor";
 
 // Visual tokens — shared with host chrome (e.g. an ExportPdfButton
@@ -79,7 +80,12 @@ export {
   canEditSlideStatus,
   canReorderSlides,
   deckOwnerEmails,
+  isDeckOwner,
+  isTeamDomainEmail,
+  isVerifiedTeamIdentity,
+  TEAM_DOMAIN,
 } from "./permissions";
+export type { PermissionContext } from "./permissions";
 
 // Types
 export type {
